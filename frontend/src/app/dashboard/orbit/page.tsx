@@ -1,58 +1,56 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import {
-  Globe2, Calendar, Clock, CheckCircle2, AlertCircle, Pause,
-  Plus, Filter, MoreHorizontal, Zap, ChevronLeft, ChevronRight,
-  Twitter, Linkedin, Instagram, Youtube, ArrowRight, RefreshCw,
-  TrendingUp, MessageSquare, ArrowUp, Search, ExternalLink
+  Globe2, Calendar, Clock, AlertCircle,
+  Plus, MoreHorizontal, ChevronLeft, ChevronRight, RefreshCw,
+  TrendingUp, MessageSquare, ArrowUp, Search, ExternalLink,
+  Eye, ThumbsUp, Youtube,
 } from "lucide-react";
-import Badge from "@/components/ui/Badge";
 import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { fetchRedditTrending, fetchPlatformStatus, getOAuthUrl, disconnectPlatform, type RedditPost, type PlatformStatus } from "@/lib/api";
+import {
+  fetchRedditTrending, fetchPlatformStatus, getOAuthUrl, disconnectPlatform,
+  fetchYouTubeTrending, searchYouTube,
+  type RedditPost, type PlatformStatus, type YouTubeVideo,
+} from "@/lib/api";
 
 // ─── Demo user (replace with real auth session later) ─────────────────────────
 const DEMO_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const DATES = Array.from({ length: 28 }, (_, i) => i + 1);
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
 
-const CALENDAR_EVENTS: Record<number, { color: string; platform: string }[]> = {
+const DEMO_DOTS: Record<number, { color: string; platform: string }[]> = {
   1:  [{ color: "#818CF8", platform: "Twitter" }],
   3:  [{ color: "#3B82F6", platform: "LinkedIn" }, { color: "#F59E0B", platform: "Instagram" }],
   5:  [{ color: "#10B981", platform: "TikTok" }],
   7:  [{ color: "#818CF8", platform: "Twitter" }, { color: "#3B82F6", platform: "LinkedIn" }],
-  9:  [{ color: "#F59E0B", platform: "Instagram" }],
   10: [{ color: "#818CF8", platform: "Twitter" }],
   12: [{ color: "#3B82F6", platform: "LinkedIn" }, { color: "#10B981", platform: "TikTok" }],
   14: [{ color: "#818CF8", platform: "Twitter" }, { color: "#F59E0B", platform: "Instagram" }, { color: "#EF4444", platform: "YouTube" }],
-  16: [{ color: "#3B82F6", platform: "LinkedIn" }],
   17: [{ color: "#818CF8", platform: "Twitter" }],
   19: [{ color: "#F59E0B", platform: "Instagram" }, { color: "#10B981", platform: "TikTok" }],
   21: [{ color: "#818CF8", platform: "Twitter" }, { color: "#3B82F6", platform: "LinkedIn" }],
   24: [{ color: "#F59E0B", platform: "Instagram" }],
   26: [{ color: "#818CF8", platform: "Twitter" }, { color: "#10B981", platform: "TikTok" }],
-  27: [{ color: "#3B82F6", platform: "LinkedIn" }],
-  28: [{ color: "#818CF8", platform: "Twitter" }, { color: "#F59E0B", platform: "Instagram" }],
+  28: [{ color: "#3B82F6", platform: "LinkedIn" }],
+  31: [{ color: "#818CF8", platform: "Twitter" }, { color: "#F59E0B", platform: "Instagram" }],
 };
 
-const QUEUE = [
-  { title: "Why Agentic AI Is Changing Work", platform: "LinkedIn",  scheduledAt: "Today, 9:00 AM",    status: "live",     type: "Article",  engagement: "est. 8–12%" },
-  { title: "5 Habits of High-Output Teams",   platform: "Twitter",   scheduledAt: "Today, 12:30 PM",   status: "scheduled",type: "Thread",   engagement: "est. 4–6%" },
-  { title: "Spring Campaign — Look 1",         platform: "Instagram", scheduledAt: "Today, 3:00 PM",    status: "scheduled",type: "Carousel", engagement: "est. 6–9%" },
-  { title: "Local-First SaaS Breakdown",      platform: "LinkedIn",  scheduledAt: "Tomorrow, 8:00 AM", status: "scheduled",type: "Article",  engagement: "est. 7–10%" },
-  { title: "Biohacking for Busy People",      platform: "TikTok",    scheduledAt: "Feb 28, 6:00 PM",   status: "paused",   type: "Video",    engagement: "est. 10–16%" },
-  { title: "Quiet Luxury Roundup",             platform: "Newsletter",scheduledAt: "Mar 1, 10:00 AM",   status: "draft",    type: "Email",    engagement: "est. 45–60%" },
+const DEMO_QUEUE = [
+  { title: "Why Agentic AI Is Changing Work", platform: "LinkedIn",   scheduledAt: "Today, 9:00 AM",    status: "live",      type: "Article"  },
+  { title: "5 Habits of High-Output Teams",   platform: "Twitter",    scheduledAt: "Today, 12:30 PM",   status: "scheduled", type: "Thread"   },
+  { title: "Spring Campaign — Look 1",         platform: "Instagram",  scheduledAt: "Today, 3:00 PM",    status: "scheduled", type: "Carousel" },
+  { title: "Local-First SaaS Breakdown",      platform: "LinkedIn",   scheduledAt: "Tomorrow, 8:00 AM", status: "scheduled", type: "Article"  },
+  { title: "Biohacking for Busy People",      platform: "TikTok",     scheduledAt: "Mar 3, 6:00 PM",    status: "paused",    type: "Video"    },
+  { title: "Quiet Luxury Roundup",             platform: "Newsletter", scheduledAt: "Mar 4, 10:00 AM",   status: "draft",     type: "Email"    },
 ];
 
-const CONNECTIONS = [
-  { name: "Twitter / X",  handle: "@acme_corp",       status: "connected",    color: "#818CF8", posts: 84 },
-  { name: "LinkedIn",     handle: "Acme Corporation", status: "connected",    color: "#3B82F6", posts: 52 },
-  { name: "Instagram",    handle: "@acme.official",   status: "connected",    color: "#F59E0B", posts: 116 },
-  { name: "TikTok",       handle: "@acme_team",       status: "connected",    color: "#10B981", posts: 38 },
-  { name: "YouTube",      handle: "Acme Corp",        status: "auth_expired", color: "#EF4444", posts: 12 },
-  { name: "Medium",       handle: "Acme Blog",        status: "not_connected",color: "#525968", posts: 0  },
-];
+const PLATFORM_COLORS: Record<string, string> = {
+  youtube: "#EF4444", linkedin: "#3B82F6", reddit: "#F97316",
+  twitter: "#818CF8", instagram: "#F59E0B", tiktok: "#10B981",
+};
 
 const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }> = {
   live:       { label: "Published",  color: "#34D399", bg: "rgba(52,211,153,0.1)" },
@@ -61,50 +59,90 @@ const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }>
   draft:      { label: "Draft",      color: "#525968", bg: "rgba(82,89,104,0.2)"  },
 };
 
-const CONN_STATUS: Record<string, { label: string; color: string }> = {
-  connected:    { label: "Connected",   color: "#34D399" },
-  auth_expired: { label: "Reconnect",   color: "#F87171" },
-  not_connected:{ label: "Connect",     color: "#525968" },
-};
+type Tab = "queue" | "connections";
 
-type QueueTab = "queue" | "connections";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtScore(n: number) {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+function fmtNum(n: number) {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
+       : n >= 1_000     ? `${(n / 1_000).toFixed(1)}k`
+       : String(n);
 }
 
-const SUBREDDITS = ["all", "python", "javascript", "technology", "programming", "webdev", "artificial", "MachineLearning"];
+const REDDIT_SUBS = ["all", "python", "javascript", "technology", "programming", "webdev", "artificial", "MachineLearning"];
+const YT_REGIONS  = [{ label: "Global", code: "US" }, { label: "IN", code: "IN" }, { label: "UK", code: "GB" }];
+const YT_CATS     = [{ label: "All", id: "0" }, { label: "Tech", id: "28" }, { label: "Entertainment", id: "24" }];
 
 export default function OrbitPage() {
-  const [queueTab, setQueueTab] = useState<QueueTab>("queue");
-  const [month] = useState("February 2026");
+  // ── Calendar ───────────────────────────────────────────────────────────────
+  const today          = new Date();
+  const [calYear,  setCalYear]  = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth()); // 0-indexed
 
-  // Reddit state
-  const [redditPosts, setRedditPosts]   = useState<RedditPost[]>([]);
-  const [redditLoading, setRedditLoading] = useState(true);
-  const [redditError, setRedditError]   = useState<string | null>(null);
-  const [subreddit, setSubreddit]       = useState("all");
-  const [searchQuery, setSearchQuery]   = useState("");
-  const [inputValue, setInputValue]     = useState("");
+  const daysInMonth    = new Date(calYear, calMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
+  const isCurrentMonth = calYear === today.getFullYear() && calMonth === today.getMonth();
+  const todayDate      = today.getDate();
 
-  // Platform connection status
+  function prevMonth() {
+    if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
+    else setCalMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); }
+    else setCalMonth(m => m + 1);
+  }
+
+  const [activeTab, setActiveTab] = useState<Tab>("queue");
+
+  // ── Reddit ─────────────────────────────────────────────────────────────────
+  const [redditPosts, setRedditPosts]       = useState<RedditPost[]>([]);
+  const [redditLoading, setRedditLoading]   = useState(true);
+  const [redditError, setRedditError]       = useState<string | null>(null);
+  const [subreddit, setSubreddit]           = useState("all");
+  const [searchQuery, setSearchQuery]       = useState("");
+  const [inputValue, setInputValue]         = useState("");
+
+  // ── Platforms ──────────────────────────────────────────────────────────────
   const [platformStatuses, setPlatformStatuses] = useState<PlatformStatus[]>([]);
   const [platformsLoading, setPlatformsLoading] = useState(true);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
 
+  const connectedCount = platformStatuses.filter(p => p.status === "connected").length;
+  const totalPlatforms = platformStatuses.length || 6;
+
+  // ── YouTube ────────────────────────────────────────────────────────────────
+  const [ytVideos, setYtVideos]   = useState<YouTubeVideo[]>([]);
+  const [ytLoading, setYtLoading] = useState(true);
+  const [ytError, setYtError]     = useState<string | null>(null);
+  const [ytRegion, setYtRegion]   = useState("US");
+  const [ytCat, setYtCat]         = useState("0");
+  const [ytInput, setYtInput]     = useState("");
+  const [ytQuery, setYtQuery]     = useState("");
+  const [ytMode, setYtMode]       = useState<"trending" | "search">("trending");
+
+  // ── Callbacks ──────────────────────────────────────────────────────────────
   const loadReddit = useCallback(async (sub: string, q: string) => {
-    setRedditLoading(true);
-    setRedditError(null);
+    setRedditLoading(true); setRedditError(null);
     try {
       const data = await fetchRedditTrending({ subreddit: sub, q, sort: "hot", limit: 12, timeframe: "month" });
       setRedditPosts(data.posts);
-    } catch {
-      setRedditError("Could not reach backend. Make sure the ORBIT server is running on :8000.");
-    } finally {
-      setRedditLoading(false);
-    }
+    } catch { setRedditError("Could not reach backend. Make sure the ORBIT server is running on :8000."); }
+    finally { setRedditLoading(false); }
+  }, []);
+
+  const loadYouTube = useCallback(async (mode: "trending" | "search", q: string, region: string, cat: string) => {
+    setYtLoading(true); setYtError(null);
+    try {
+      if (mode === "search" && q.trim()) {
+        const data = await searchYouTube({ q, maxResults: 12, order: "relevance" });
+        setYtVideos(data.results);
+      } else {
+        const data = await fetchYouTubeTrending({ regionCode: region, categoryId: cat, maxResults: 12 });
+        setYtVideos(data.results);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setYtError(msg.includes("503") ? "YouTube API key not configured." : "YouTube API error. Check backend.");
+    } finally { setYtLoading(false); }
   }, []);
 
   const loadPlatformStatus = useCallback(async () => {
@@ -112,22 +150,15 @@ export default function OrbitPage() {
     try {
       const data = await fetchPlatformStatus(DEMO_USER_ID);
       setPlatformStatuses(data.platforms);
-    } catch {
-      // Fall back silently – connections tab will show not_connected
-    } finally {
-      setPlatformsLoading(false);
-    }
+    } catch { /* silent */ }
+    finally { setPlatformsLoading(false); }
   }, []);
 
   const handleConnect = useCallback(async (platform: string) => {
     if (platform !== "youtube" && platform !== "linkedin") return;
     setConnectingPlatform(platform);
-    try {
-      const url = await getOAuthUrl(platform, DEMO_USER_ID);
-      window.location.href = url;
-    } catch {
-      setConnectingPlatform(null);
-    }
+    try { const url = await getOAuthUrl(platform, DEMO_USER_ID); window.location.href = url; }
+    catch { setConnectingPlatform(null); }
   }, []);
 
   const handleDisconnect = useCallback(async (platform: string) => {
@@ -136,16 +167,12 @@ export default function OrbitPage() {
   }, [loadPlatformStatus]);
 
   useEffect(() => { loadReddit(subreddit, searchQuery); }, [subreddit, searchQuery, loadReddit]);
+  useEffect(() => { loadYouTube(ytMode, ytQuery, ytRegion, ytCat); }, [ytMode, ytQuery, ytRegion, ytCat, loadYouTube]);
   useEffect(() => { loadPlatformStatus(); }, [loadPlatformStatus]);
 
-  // Re-fetch platform status after OAuth callback redirect
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("status") === "connected" || params.get("status") === "error") {
-      loadPlatformStatus();
-      // Clean up the URL
-      window.history.replaceState({}, "", window.location.pathname);
-    }
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("status")) { loadPlatformStatus(); window.history.replaceState({}, "", window.location.pathname); }
   }, [loadPlatformStatus]);
 
   return (
@@ -163,8 +190,10 @@ export default function OrbitPage() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[rgba(59,130,246,0.08)] border border-[rgba(59,130,246,0.2)]">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#60A5FA] animate-pulse-slow" />
-            <span className="text-xs text-[#60A5FA] font-medium">5 platforms active</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-[#60A5FA] animate-pulse" />
+            <span className="text-xs text-[#60A5FA] font-medium">
+              {platformsLoading ? "…" : `${connectedCount} platform${connectedCount !== 1 ? "s" : ""} connected`}
+            </span>
           </div>
           <Button variant="primary" size="md" icon={<Plus size={13} />} className="bg-[#3B82F6] hover:bg-[#60A5FA] hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
             Schedule post
@@ -175,10 +204,10 @@ export default function OrbitPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
-          { label: "Published this month", value: "163", color: "#34D399" },
-          { label: "Scheduled",            value: "48",  color: "#60A5FA" },
-          { label: "Platforms connected",  value: "5/6", color: "#3B82F6" },
-          { label: "Avg. best time score", value: "92%", color: "#FBBF24" },
+          { label: "Published this month", value: "163",  color: "#34D399" },
+          { label: "Scheduled",            value: "48",   color: "#60A5FA" },
+          { label: "Platforms connected",  value: platformsLoading ? "…" : `${connectedCount}/${totalPlatforms}`, color: "#3B82F6" },
+          { label: "Avg. best time score", value: "92%",  color: "#FBBF24" },
         ].map(({ label, value, color }) => (
           <Card key={label} padding="md">
             <p className="text-xs text-[var(--text-muted)] mb-2">{label}</p>
@@ -193,11 +222,11 @@ export default function OrbitPage() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <Calendar size={14} className="text-[var(--text-muted)]" />
-              <CardTitle>{month}</CardTitle>
+              <CardTitle>{MONTHS[calMonth]} {calYear}</CardTitle>
             </div>
             <div className="flex items-center gap-1">
-              <button className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-muted)] transition-colors"><ChevronLeft size={14} /></button>
-              <button className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-muted)] transition-colors"><ChevronRight size={14} /></button>
+              <button onClick={prevMonth} className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-muted)] transition-colors"><ChevronLeft size={14} /></button>
+              <button onClick={nextMonth} className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-muted)] transition-colors"><ChevronRight size={14} /></button>
             </div>
           </CardHeader>
 
@@ -208,10 +237,12 @@ export default function OrbitPage() {
           </div>
 
           <div className="grid grid-cols-7 gap-0">
-            {/* Month starts on Sunday for Feb 2026 */}
-            {DATES.map((date) => {
-              const events = CALENDAR_EVENTS[date] || [];
-              const isToday = date === 27;
+            {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+              <div key={`e-${i}`} className="min-h-[52px]" />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((date) => {
+              const events = DEMO_DOTS[date] || [];
+              const isToday = isCurrentMonth && date === todayDate;
               return (
                 <div
                   key={date}
@@ -257,12 +288,12 @@ export default function OrbitPage() {
 
           {/* Tabs */}
           <div className="flex items-center gap-1 border-b border-[var(--border)]">
-            {(["queue", "connections"] as QueueTab[]).map(t => (
+            {(["queue", "connections"] as Tab[]).map(t => (
               <button
                 key={t}
-                onClick={() => setQueueTab(t)}
+                onClick={() => setActiveTab(t)}
                 className={`px-4 py-2 text-sm font-medium capitalize transition-all border-b-2 -mb-px ${
-                  queueTab === t
+                  activeTab === t
                     ? "border-[#3B82F6] text-[#60A5FA]"
                     : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                 }`}
@@ -272,10 +303,11 @@ export default function OrbitPage() {
             ))}
           </div>
 
-          {queueTab === "queue" && (
-            <div className="flex flex-col gap-2.5">
-              {QUEUE.map(({ title, platform, scheduledAt, status, type, engagement }) => {
-                const s = STATUS_STYLE[status];
+          {activeTab === "queue" && (
+            <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[420px] pr-0.5">
+              {DEMO_QUEUE.map(({ title, platform, scheduledAt, status, type }) => {
+                const s = STATUS_STYLE[status] ?? STATUS_STYLE.draft;
+                const pColor = PLATFORM_COLORS[platform.toLowerCase()] ?? "#525968";
                 return (
                   <div
                     key={title}
@@ -285,12 +317,12 @@ export default function OrbitPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-[var(--text-primary)] truncate">{title}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[10px] text-[var(--text-muted)]">{platform}</span>
+                          <span className="text-[10px] font-medium" style={{ color: pColor }}>{platform}</span>
                           <span className="text-[10px] text-[var(--text-muted)]">·</span>
                           <span className="text-[10px] text-[var(--text-muted)]">{type}</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 flex-shrink-0">
                         <span
                           className="text-[10px] font-medium px-2 py-0.5 rounded-full"
                           style={{ color: s.color, background: s.bg }}
@@ -302,11 +334,8 @@ export default function OrbitPage() {
                         </button>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                        <Clock size={9} />{scheduledAt}
-                      </div>
-                      <span className="text-[10px] text-[#34D399]">{engagement}</span>
+                    <div className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                      <Clock size={9} />{scheduledAt}
                     </div>
                   </div>
                 );
@@ -314,18 +343,13 @@ export default function OrbitPage() {
             </div>
           )}
 
-          {queueTab === "connections" && (
-            <div className="flex flex-col gap-2.5">
+          {activeTab === "connections" && (
+            <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[420px] pr-0.5">
               {platformsLoading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="h-[64px] rounded-xl bg-white/[0.03] border border-[var(--border)] animate-pulse" />
                 ))
-              ) : (platformStatuses.length > 0 ? platformStatuses : CONNECTIONS.map(c => ({
-                  platform: c.name.toLowerCase().split(" ")[0],
-                  status: c.status as "connected" | "auth_expired" | "not_connected",
-                  account_name: c.handle,
-                  account_id: null,
-                }))).map((item) => {
+              ) : platformStatuses.map((item) => {
                 const isOAuthPlatform = item.platform === "youtube" || item.platform === "linkedin";
                 const displayName =
                   item.platform === "youtube" ? "YouTube" :
@@ -335,10 +359,6 @@ export default function OrbitPage() {
                   item.platform === "instagram" ? "Instagram" :
                   item.platform.charAt(0).toUpperCase() + item.platform.slice(1);
 
-                const PLATFORM_COLORS: Record<string, string> = {
-                  youtube: "#EF4444", linkedin: "#3B82F6", reddit: "#F97316",
-                  twitter: "#818CF8", instagram: "#F59E0B", tiktok: "#10B981",
-                };
                 const color = PLATFORM_COLORS[item.platform] ?? "#525968";
 
                 const statusStyle: Record<string, { label: string; color: string }> = {
@@ -405,8 +425,8 @@ export default function OrbitPage() {
       </div>
 
       {/* ── Reddit Insights ───────────────────────────────────────────── */}
-      <div className="mt-6">
-        <div className="flex items-center justify-between mb-4">
+      <section className="mt-8">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div className="flex items-center gap-2">
             <TrendingUp size={15} className="text-[#F97316]" />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Reddit Insights</h2>
@@ -428,7 +448,7 @@ export default function OrbitPage() {
             </div>
             {/* Subreddit pills */}
             <div className="flex items-center gap-1 overflow-x-auto">
-              {SUBREDDITS.map(s => (
+              {REDDIT_SUBS.map(s => (
                 <button
                   key={s}
                   onClick={() => { setSubreddit(s); setSearchQuery(""); setInputValue(""); }}
@@ -491,10 +511,10 @@ export default function OrbitPage() {
                   <span className="text-[10px] text-[var(--text-muted)] truncate">r/{post.subreddit}</span>
                   <div className="flex items-center gap-2 ml-auto">
                     <span className="flex items-center gap-0.5 text-[10px] text-[#34D399]">
-                      <ArrowUp size={9} />{fmtScore(post.score)}
+                      <ArrowUp size={9} />{fmtNum(post.score)}
                     </span>
                     <span className="flex items-center gap-0.5 text-[10px] text-[var(--text-muted)]">
-                      <MessageSquare size={9} />{fmtScore(post.num_comments)}
+                      <MessageSquare size={9} />{fmtNum(post.num_comments)}
                     </span>
                   </div>
                 </div>
@@ -502,7 +522,99 @@ export default function OrbitPage() {
             ))}
           </div>
         )}
-      </div>
+      </section>
+
+      {/* ── YouTube Insights ─────────────────────────────────────────────── */}
+      <section className="mt-8">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <Youtube size={15} className="text-[#EF4444]" />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">YouTube Insights</h2>
+            <span className="text-[10px] text-[var(--text-muted)] bg-white/5 px-2 py-0.5 rounded-full">
+              {ytMode === "search" && ytQuery ? `“${ytQuery}”` : `Trending · ${ytRegion}`} · live
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-2.5 py-1.5">
+              <Search size={11} className="text-[var(--text-muted)]" />
+              <input
+                value={ytInput}
+                onChange={e => setYtInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { setYtQuery(ytInput); setYtMode("search"); } }}
+                placeholder="Search YouTube…"
+                className="bg-transparent text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none w-32"
+              />
+            </div>
+            <div className="flex items-center gap-1">
+              {YT_REGIONS.map(r => (
+                <button key={r.code}
+                  onClick={() => { setYtRegion(r.code); setYtMode("trending"); setYtQuery(""); setYtInput(""); }}
+                  className={`text-[10px] px-2 py-1 rounded-md font-medium whitespace-nowrap transition-all ${
+                    ytRegion === r.code && ytMode === "trending" ? "bg-[#EF4444] text-white" : "bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}>{r.label}</button>
+              ))}
+              {YT_CATS.map(c => (
+                <button key={c.id}
+                  onClick={() => { setYtCat(c.id); setYtMode("trending"); setYtQuery(""); setYtInput(""); }}
+                  className={`text-[10px] px-2 py-1 rounded-md font-medium whitespace-nowrap transition-all ${
+                    ytCat === c.id && ytMode === "trending" ? "bg-[rgba(239,68,68,0.2)] text-[#EF4444] border border-[rgba(239,68,68,0.3)]" : "bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  }`}>{c.label}</button>
+              ))}
+            </div>
+            <button
+              onClick={() => loadYouTube(ytMode, ytQuery, ytRegion, ytCat)}
+              className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-muted)] transition-colors" title="Refresh"
+            >
+              <RefreshCw size={13} className={ytLoading ? "animate-spin" : ""} />
+            </button>
+          </div>
+        </div>
+
+        {ytError && (
+          <div className="flex items-center gap-2 text-xs text-[#F87171] bg-[rgba(248,113,113,0.08)] border border-[rgba(248,113,113,0.2)] rounded-lg px-4 py-3 mb-4">
+            <AlertCircle size={13} /> {ytError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {ytLoading
+            ? Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-[160px] rounded-xl bg-white/[0.03] border border-[var(--border)] animate-pulse" />
+              ))
+            : ytVideos.map(video => (
+                <a key={video.id} href={video.url ?? "#"} target="_blank" rel="noopener noreferrer"
+                  className="group bg-[var(--bg-card)] border border-[var(--border)] rounded-xl overflow-hidden hover:border-[#EF4444]/40 hover:bg-[rgba(239,68,68,0.02)] transition-all flex flex-col">
+                  {video.thumbnail ? (
+                    <div className="relative w-full aspect-video bg-black overflow-hidden">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={video.thumbnail} alt={video.title ?? ""} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                        <Youtube size={24} className="text-white opacity-0 group-hover:opacity-80 transition-opacity" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="w-full aspect-video bg-[rgba(239,68,68,0.06)] flex items-center justify-center">
+                      <Youtube size={20} className="text-[#EF4444]/40" />
+                    </div>
+                  )}
+                  <div className="p-3 flex flex-col gap-1.5 flex-1">
+                    <p className="text-[11px] font-medium text-[var(--text-primary)] line-clamp-2 leading-snug">{video.title}</p>
+                    <p className="text-[10px] text-[var(--text-muted)] truncate">{video.channel}</p>
+                    <div className="flex items-center gap-3 mt-auto pt-1.5 border-t border-[var(--border)]">
+                      <span className="flex items-center gap-0.5 text-[10px] text-[var(--text-muted)]">
+                        <Eye size={9} />{fmtNum(video.view_count)}
+                      </span>
+                      <span className="flex items-center gap-0.5 text-[10px] text-[#34D399]">
+                        <ThumbsUp size={9} />{fmtNum(video.like_count)}
+                      </span>
+                    </div>
+                  </div>
+                </a>
+              ))
+          }
+        </div>
+      </section>
+
     </div>
   );
 }
