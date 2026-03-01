@@ -43,7 +43,11 @@ YOUTUBE_SCOPES     = " ".join([
 
 LINKEDIN_AUTH_URL  = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
-LINKEDIN_SCOPES    = "openid profile email w_member_social"
+# NOTE: "w_member_social" (posting) requires "Share on LinkedIn" product approval
+# in the LinkedIn Developer Portal → Products tab. Without that approval LinkedIn
+# silently loops back to the login page.
+# Use only OIDC profile scopes until the product is approved.
+LINKEDIN_SCOPES    = "openid profile email"
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -238,20 +242,20 @@ async def linkedin_callback(
             )
         token_data = resp.json()
 
-        # Fetch profile for account_name
+        # Fetch profile using OIDC userinfo endpoint (compatible with openid+profile scopes)
         profile_name = None
         profile_id = None
         try:
             me_resp = await client.get(
-                "https://api.linkedin.com/v2/me",
+                "https://api.linkedin.com/v2/userinfo",
                 headers={"Authorization": f"Bearer {token_data['access_token']}"},
             )
             if me_resp.status_code == 200:
                 me = me_resp.json()
-                profile_id = me.get("id")
-                fn = me.get("localizedFirstName", "")
-                ln = me.get("localizedLastName", "")
-                profile_name = f"{fn} {ln}".strip() or None
+                profile_id = me.get("sub")
+                profile_name = me.get("name") or (
+                    f"{me.get('given_name', '')} {me.get('family_name', '')}".strip() or None
+                )
         except Exception:
             pass
 
