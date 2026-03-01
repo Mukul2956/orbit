@@ -75,6 +75,10 @@ class TimingEngine:
                 return await self._predict_with_prophet(patterns, platform, target_tz)
             except Exception as exc:
                 logger.warning("Prophet prediction failed (%s); using defaults.", exc)
+                return self._get_default_time(
+                    platform, target_tz,
+                    reason=f"Industry default for {platform} — ML forecast unavailable (Stan backend not configured); {len(patterns)} historical rows available",
+                )
 
         return self._get_default_time(platform, target_tz)
 
@@ -222,7 +226,7 @@ class TimingEngine:
             df = df[df["ds"].dt.dayofweek < 5]
         return df
 
-    def _get_default_time(self, platform: str, target_tz: str = "UTC") -> dict:
+    def _get_default_time(self, platform: str, target_tz: str = "UTC", reason: str | None = None) -> dict:
         """Return the industry-default posting time for the given platform."""
         cfg = PLATFORM_DEFAULTS.get(platform, {"hour": 10, "min": 0, "avoid_weekends": False})
         now = datetime.utcnow()
@@ -244,5 +248,5 @@ class TimingEngine:
             "optimal_time": candidate,
             "confidence_score": 0.3,
             "is_default_time": True,
-            "reasoning": f"Industry default for {platform} — insufficient historical data",
+            "reasoning": reason or f"Industry default for {platform} — insufficient historical data",
         }
