@@ -228,3 +228,48 @@ export async function fetchOptimalTime(
   if (!res.ok) throw new Error(`Schedule API error ${res.status}`);
   return res.json();
 }
+
+// ─── Data Ingestion ──────────────────────────────────────────────────────────
+
+export interface IngestResult {
+  platform: string;
+  rows_inserted: number;
+  errors: string[];
+}
+
+export interface IngestAllResult {
+  total_rows_inserted: number;
+  reddit: IngestResult;
+  youtube: IngestResult;
+  linkedin: IngestResult;
+}
+
+export interface IngestStatus {
+  user_id: string;
+  audience_patterns: Record<string, number>;
+  platform_performance: Record<string, number>;
+  total_audience_patterns: number;
+  total_platform_performance: number;
+  ml_threshold: number;
+  ml_ready: Record<string, boolean>;
+}
+
+export async function triggerIngest(
+  userId: string,
+  platform: "reddit" | "youtube" | "linkedin" | "all",
+  opts: Record<string, string> = {}
+): Promise<IngestResult | IngestAllResult> {
+  const params = new URLSearchParams({ user_id: userId, ...opts });
+  const res = await fetch(
+    `${API_BASE}/api/v1/ingest/${platform}?${params}`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(`Ingest API error ${res.status}`);
+  return res.json();
+}
+
+export async function fetchIngestStatus(userId: string): Promise<IngestStatus> {
+  const res = await fetch(`${API_BASE}/api/v1/ingest/status/${userId}`);
+  if (!res.ok) throw new Error(`Ingest status API error ${res.status}`);
+  return res.json();
+}

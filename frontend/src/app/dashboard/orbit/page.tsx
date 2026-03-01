@@ -4,14 +4,16 @@ import {
   Globe2, Calendar, Clock, AlertCircle, Zap,
   Plus, MoreHorizontal, ChevronLeft, ChevronRight, RefreshCw,
   TrendingUp, MessageSquare, ArrowUp, Search, ExternalLink,
-  Eye, ThumbsUp, Youtube,
+  Eye, ThumbsUp, Youtube, Download, CheckCircle2, Database,
 } from "lucide-react";
 import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import {
   fetchRedditTrending, fetchPlatformStatus, getOAuthUrl, disconnectPlatform,
   fetchYouTubeTrending, searchYouTube, fetchOptimalTime,
+  triggerIngest, fetchIngestStatus,
   type RedditPost, type PlatformStatus, type YouTubeVideo, type OptimalTimeResponse,
+  type IngestStatus, type IngestResult, type IngestAllResult,
 } from "@/lib/api";
 
 // ─── Demo user (replace with real auth session later) ─────────────────────────
@@ -169,7 +171,10 @@ export default function OrbitPage() {
   // ── Optimal Timing ──────────────────────────────────────────────
   const [timingData, setTimingData] = useState<Record<string, OptimalTimeResponse>>({});
   const [timingLoading, setTimingLoading] = useState(true);
-
+  // ── Ingest / data sync state ─────────────────────────────────────────────
+  const [ingestStatus, setIngestStatus] = useState<IngestStatus | null>(null);
+  const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
+  const [ingestResults, setIngestResults] = useState<Record<string, {rows: number; errors: string[]; ts: string}>>({});
   const loadTiming = useCallback(async () => {
     setTimingLoading(true);
     const results: Record<string, OptimalTimeResponse> = {};
@@ -185,6 +190,45 @@ export default function OrbitPage() {
   }, []);
 
   useEffect(() => { loadTiming(); }, [loadTiming]);
+
+  // ── Ingest helpers ───────────────────────────────────────────────────────
+  const loadIngestStatus = useCallback(async () => {
+    try {
+      const s = await fetchIngestStatus(DEMO_USER_ID);
+      setIngestStatus(s);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { loadIngestStatus(); }, [loadIngestStatus]);
+
+  const handleIngest = useCallback(async (platform: "reddit" | "youtube" | "linkedin" | "all") => {
+    setIngestingPlatform(platform);
+    try {
+      const result = await triggerIngest(DEMO_USER_ID, platform);
+      const now = new Date().toLocaleTimeString();
+      if (platform === "all") {
+        const r = result as IngestAllResult;
+        setIngestResults(prev => ({
+          ...prev,
+          reddit:   { rows: r.reddit.rows_inserted,   errors: r.reddit.errors,   ts: now },
+          youtube:  { rows: r.youtube.rows_inserted,  errors: r.youtube.errors,  ts: now },
+          linkedin: { rows: r.linkedin.rows_inserted, errors: r.linkedin.errors, ts: now },
+        }));
+      } else {
+        const r = result as IngestResult;
+        setIngestResults(prev => ({ ...prev, [platform]: { rows: r.rows_inserted, errors: r.errors, ts: now } }));
+      }
+      await loadIngestStatus();
+      // Refresh timing predictions with new data
+      loadTiming();
+    } catch (e: any) {
+      const now = new Date().toLocaleTimeString();
+      const key = platform === "all" ? "all" : platform;
+      setIngestResults(prev => ({ ...prev, [key]: { rows: 0, errors: [e.message], ts: now } }));
+    } finally {
+      setIngestingPlatform(null);
+    }
+  }, [loadIngestStatus, loadTiming]);
   useEffect(() => { loadYouTube(ytMode, ytQuery, ytRegion, ytCat); }, [ytMode, ytQuery, ytRegion, ytCat, loadYouTube]);
   useEffect(() => { loadPlatformStatus(); }, [loadPlatformStatus]);
 
@@ -718,6 +762,130 @@ export default function OrbitPage() {
                 </a>
               ))
           }
+        </div>
+      </section>
+
+      {/* ── Data Sync ─────────────────────────────────────────────────────── */}
+      <section className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Database size={15} className="text-[#818CF8]" />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Data Sync</h2>
+            <span className="text-[10px] text-[var(--text-muted)] bg-white/5 px-2 py-0.5 rounded-full">
+              Pull real engagement data to train ML models
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={loadIngestStatus}
+              className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-muted)] transition-colors" title="Refresh status">
+              <RefreshCw size={13} />
+            </button>
+            <button
+              onClick={() => handleIngest("all")}
+              disabled={ingestingPlatform !== null}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[rgba(129,140,248,0.12)] text-[#818CF8] border border-[rgba(129,140,248,0.2)] hover:bg-[rgba(129,140,248,0.2)] disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium"
+            >
+              <Download size={11} className={ingestingPlatform === "all" ? "animate-bounce" : ""} />
+              {ingestingPlatform === "all" ? "Syncing…" : "Sync All"}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {(["reddit", "youtube", "linkedin"] as const).map(platform => {
+            const color = PLATFORM_COLORS[platform] ?? "#525968";
+            const label = { reddit: "Reddit", youtube: "YouTube", linkedin: "LinkedIn" }[platform];
+            const patterns = ingestStatus?.audience_patterns[platform] ?? 0;
+            const perf = ingestStatus?.platform_performance[platform] ?? 0;
+            const mlReady = ingestStatus?.ml_ready[platform] ?? false;
+            const threshold = ingestStatus?.ml_threshold ?? 50;
+            const result = ingestResults[platform];
+            const isIngesting = ingestingPlatform === platform || ingestingPlatform === "all";
+            const pct = Math.min(100, Math.round((patterns / threshold) * 100));
+
+            return (
+              <Card key={platform} padding="md" className="flex flex-col gap-3">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold"
+                      style={{ background: `${color}15`, border: `1px solid ${color}30`, color }}>
+                      {label.slice(0, 2)}
+                    </div>
+                    <span className="text-xs font-semibold text-[var(--text-primary)]">{label}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {mlReady ? (
+                      <span className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-[rgba(52,211,153,0.12)] text-[#34D399]">
+                        <CheckCircle2 size={9} /> ML Ready
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-white/5 text-[var(--text-muted)]">
+                        {patterns}/{threshold} rows
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row counts */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-[var(--bg-surface)] rounded-lg p-2 text-center">
+                    <p className="text-base font-bold" style={{ color }}>{patterns.toLocaleString()}</p>
+                    <p className="text-[9px] text-[var(--text-muted)] mt-0.5">Timing rows</p>
+                  </div>
+                  <div className="bg-[var(--bg-surface)] rounded-lg p-2 text-center">
+                    <p className="text-base font-bold text-[var(--text-primary)]">{perf.toLocaleString()}</p>
+                    <p className="text-[9px] text-[var(--text-muted)] mt-0.5">Post analytics</p>
+                  </div>
+                </div>
+
+                {/* ML threshold progress bar */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-[9px] text-[var(--text-muted)]">ML threshold</span>
+                    <span className="text-[9px]" style={{ color }}>{pct}%</span>
+                  </div>
+                  <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700"
+                      style={{ width: `${pct}%`, background: color }} />
+                  </div>
+                </div>
+
+                {/* Last sync result */}
+                {result && (
+                  <div className={`px-2.5 py-1.5 rounded-lg text-[9px] leading-relaxed ${
+                    result.errors.length > 0
+                      ? "bg-[rgba(248,113,113,0.08)] text-[#F87171] border border-[rgba(248,113,113,0.15)]"
+                      : "bg-[rgba(52,211,153,0.08)] text-[#34D399] border border-[rgba(52,211,153,0.15)]"
+                  }`}>
+                    {result.errors.length > 0
+                      ? result.errors[0].slice(0, 100)
+                      : `+${result.rows} rows synced at ${result.ts}`}
+                  </div>
+                )}
+
+                {/* Sync button */}
+                <button
+                  onClick={() => handleIngest(platform)}
+                  disabled={ingestingPlatform !== null}
+                  className="flex items-center justify-center gap-1.5 text-[11px] py-1.5 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                  style={{ background: `${color}18`, color, border: `1px solid ${color}28` }}
+                >
+                  <Download size={10} className={isIngesting ? "animate-bounce" : ""} />
+                  {isIngesting ? "Pulling data…" : `Pull ${label} data`}
+                </button>
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* How it works note */}
+        <div className="mt-4 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] text-[10px] text-[var(--text-muted)] leading-relaxed">
+          <span className="font-semibold text-[var(--text-secondary)]">How data sync works: </span>
+          <span className="text-[#F97316]">Reddit</span> — pulls top posts from your niche subreddits using the public API (no login needed). Engagement = (upvotes + comments) / estimated reach.{" "}
+          <span className="text-[#EF4444]">YouTube</span> — pulls trending videos via YouTube Data API. Requires <code className="font-mono text-[10px] bg-white/5 px-1 py-0.5 rounded">YOUTUBE_API_KEY</code> in .env. Engagement = (likes + comments) / views.{" "}
+          <span className="text-[#3B82F6]">LinkedIn</span> — pulls your own posts via LinkedIn API. Requires connecting LinkedIn first (OAuth token).{" "}
+          After syncing, re-run <code className="font-mono text-[10px] bg-white/5 px-1 py-0.5 rounded">python scripts/train_models.py</code> to retrain LightGBM on the real data.
         </div>
       </section>
 

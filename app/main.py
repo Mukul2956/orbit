@@ -16,6 +16,7 @@ from app.api import (
     auth_router,
     platforms_router,
     youtube_router,
+    ingest_router,
 )
 from app.config import settings
 
@@ -52,6 +53,7 @@ app.include_router(reddit_router)
 app.include_router(auth_router)
 app.include_router(platforms_router)
 app.include_router(youtube_router)
+app.include_router(ingest_router)
 
 
 # ─── Health / status ─────────────────────────────────────────────────────────
