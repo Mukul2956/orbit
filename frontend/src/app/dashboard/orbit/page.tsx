@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import {
-  Globe2, Calendar, Clock, AlertCircle,
+  Globe2, Calendar, Clock, AlertCircle, Zap,
   Plus, MoreHorizontal, ChevronLeft, ChevronRight, RefreshCw,
   TrendingUp, MessageSquare, ArrowUp, Search, ExternalLink,
   Eye, ThumbsUp, Youtube,
@@ -10,8 +10,8 @@ import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import {
   fetchRedditTrending, fetchPlatformStatus, getOAuthUrl, disconnectPlatform,
-  fetchYouTubeTrending, searchYouTube,
-  type RedditPost, type PlatformStatus, type YouTubeVideo,
+  fetchYouTubeTrending, searchYouTube, fetchOptimalTime,
+  type RedditPost, type PlatformStatus, type YouTubeVideo, type OptimalTimeResponse,
 } from "@/lib/api";
 
 // ─── Demo user (replace with real auth session later) ─────────────────────────
@@ -166,7 +166,25 @@ export default function OrbitPage() {
     await loadPlatformStatus();
   }, [loadPlatformStatus]);
 
-  useEffect(() => { loadReddit(subreddit, searchQuery); }, [subreddit, searchQuery, loadReddit]);
+  // ── Optimal Timing ──────────────────────────────────────────────
+  const [timingData, setTimingData] = useState<Record<string, OptimalTimeResponse>>({});
+  const [timingLoading, setTimingLoading] = useState(true);
+
+  const loadTiming = useCallback(async () => {
+    setTimingLoading(true);
+    const results: Record<string, OptimalTimeResponse> = {};
+    await Promise.all(
+      ["linkedin", "youtube", "reddit"].map(async (p) => {
+        try {
+          results[p] = await fetchOptimalTime(DEMO_USER_ID, p);
+        } catch { /* silent */ }
+      })
+    );
+    setTimingData(results);
+    setTimingLoading(false);
+  }, []);
+
+  useEffect(() => { loadTiming(); }, [loadTiming]);
   useEffect(() => { loadYouTube(ytMode, ytQuery, ytRegion, ytCat); }, [ytMode, ytQuery, ytRegion, ytCat, loadYouTube]);
   useEffect(() => { loadPlatformStatus(); }, [loadPlatformStatus]);
 
@@ -423,7 +441,95 @@ export default function OrbitPage() {
           )}
         </div>
       </div>
+      {/* ── Optimal Posting Times ──────────────────────────────────────── */}
+      <section className="mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Zap size={15} className="text-[#FBBF24]" />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Optimal Posting Times</h2>
+            <span className="text-[10px] text-[var(--text-muted)] bg-white/5 px-2 py-0.5 rounded-full">
+              Prophet ML forecast · 7-day window
+            </span>
+          </div>
+          <button onClick={loadTiming}
+            className="p-1.5 rounded-md hover:bg-white/5 text-[var(--text-muted)] transition-colors" title="Refresh">
+            <RefreshCw size={13} className={timingLoading ? "animate-spin" : ""} />
+          </button>
+        </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {["linkedin", "youtube", "reddit"].map(platform => {
+            const t = timingData[platform];
+            const color = PLATFORM_COLORS[platform] ?? "#525968";
+            const displayName = { linkedin: "LinkedIn", youtube: "YouTube", reddit: "Reddit" }[platform];
+            const isML = t && !t.is_default_time;
+
+            return (
+              <Card key={platform} padding="md" className="flex flex-col gap-3">
+                {/* Platform header */}
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold"
+                    style={{ background: `${color}15`, border: `1px solid ${color}30`, color }}>
+                    {displayName!.slice(0, 2)}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-[var(--text-primary)]">{displayName}</p>
+                    <p className="text-[10px] text-[var(--text-muted)]">
+                      {isML ? "ML forecast" : "Industry default"}
+                    </p>
+                  </div>
+                  <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full ${
+                    isML ? "bg-[rgba(52,211,153,0.12)] text-[#34D399]" : "bg-white/5 text-[var(--text-muted)]"
+                  }`}>
+                    {isML ? "ML" : "Default"}
+                  </span>
+                </div>
+
+                {/* Time block */}
+                {timingLoading ? (
+                  <div className="h-9 rounded-lg bg-white/[0.04] animate-pulse" />
+                ) : t ? (
+                  <div className="px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]">
+                    <p className="text-base font-bold" style={{ color }}>
+                      {new Date(t.optimal_time).toLocaleString("en-US", {
+                        weekday: "short", month: "short", day: "numeric",
+                        hour: "2-digit", minute: "2-digit",
+                      })}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]">
+                    <p className="text-xs text-[var(--text-muted)]">Unavailable</p>
+                  </div>
+                )}
+
+                {/* Confidence bar */}
+                {t && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-[var(--text-muted)]">Confidence</span>
+                      <span className="text-[10px] font-medium" style={{ color }}>
+                        {Math.round((t.confidence_score ?? 0) * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-700"
+                        style={{ width: `${Math.round((t.confidence_score ?? 0) * 100)}%`, background: color }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Reasoning */}
+                {t?.reasoning && (
+                  <p className="text-[9px] text-[var(--text-muted)] leading-relaxed line-clamp-2">
+                    {t.reasoning}
+                  </p>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      </section>
       {/* ── Reddit Insights ───────────────────────────────────────────── */}
       <section className="mt-8">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
