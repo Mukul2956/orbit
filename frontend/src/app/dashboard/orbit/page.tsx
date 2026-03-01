@@ -9,7 +9,10 @@ import {
 import Badge from "@/components/ui/Badge";
 import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { fetchRedditTrending, type RedditPost } from "@/lib/api";
+import { fetchRedditTrending, fetchPlatformStatus, getOAuthUrl, disconnectPlatform, type RedditPost, type PlatformStatus } from "@/lib/api";
+
+// ─── Demo user (replace with real auth session later) ─────────────────────────
+const DEMO_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DATES = Array.from({ length: 28 }, (_, i) => i + 1);
@@ -86,6 +89,11 @@ export default function OrbitPage() {
   const [searchQuery, setSearchQuery]   = useState("");
   const [inputValue, setInputValue]     = useState("");
 
+  // Platform connection status
+  const [platformStatuses, setPlatformStatuses] = useState<PlatformStatus[]>([]);
+  const [platformsLoading, setPlatformsLoading] = useState(true);
+  const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
+
   const loadReddit = useCallback(async (sub: string, q: string) => {
     setRedditLoading(true);
     setRedditError(null);
@@ -99,7 +107,46 @@ export default function OrbitPage() {
     }
   }, []);
 
+  const loadPlatformStatus = useCallback(async () => {
+    setPlatformsLoading(true);
+    try {
+      const data = await fetchPlatformStatus(DEMO_USER_ID);
+      setPlatformStatuses(data.platforms);
+    } catch {
+      // Fall back silently – connections tab will show not_connected
+    } finally {
+      setPlatformsLoading(false);
+    }
+  }, []);
+
+  const handleConnect = useCallback(async (platform: string) => {
+    if (platform !== "youtube" && platform !== "linkedin") return;
+    setConnectingPlatform(platform);
+    try {
+      const url = await getOAuthUrl(platform, DEMO_USER_ID);
+      window.location.href = url;
+    } catch {
+      setConnectingPlatform(null);
+    }
+  }, []);
+
+  const handleDisconnect = useCallback(async (platform: string) => {
+    await disconnectPlatform(DEMO_USER_ID, platform);
+    await loadPlatformStatus();
+  }, [loadPlatformStatus]);
+
   useEffect(() => { loadReddit(subreddit, searchQuery); }, [subreddit, searchQuery, loadReddit]);
+  useEffect(() => { loadPlatformStatus(); }, [loadPlatformStatus]);
+
+  // Re-fetch platform status after OAuth callback redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("status") === "connected" || params.get("status") === "error") {
+      loadPlatformStatus();
+      // Clean up the URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [loadPlatformStatus]);
 
   return (
     <div className="p-6 max-w-[1400px]">
@@ -269,33 +316,89 @@ export default function OrbitPage() {
 
           {queueTab === "connections" && (
             <div className="flex flex-col gap-2.5">
-              {CONNECTIONS.map(({ name, handle, status, color, posts }) => {
-                const cs = CONN_STATUS[status];
+              {platformsLoading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-[64px] rounded-xl bg-white/[0.03] border border-[var(--border)] animate-pulse" />
+                ))
+              ) : (platformStatuses.length > 0 ? platformStatuses : CONNECTIONS.map(c => ({
+                  platform: c.name.toLowerCase().split(" ")[0],
+                  status: c.status as "connected" | "auth_expired" | "not_connected",
+                  account_name: c.handle,
+                  account_id: null,
+                }))).map((item) => {
+                const isOAuthPlatform = item.platform === "youtube" || item.platform === "linkedin";
+                const displayName =
+                  item.platform === "youtube" ? "YouTube" :
+                  item.platform === "linkedin" ? "LinkedIn" :
+                  item.platform === "reddit" ? "Reddit" :
+                  item.platform === "twitter" ? "Twitter / X" :
+                  item.platform === "instagram" ? "Instagram" :
+                  item.platform.charAt(0).toUpperCase() + item.platform.slice(1);
+
+                const PLATFORM_COLORS: Record<string, string> = {
+                  youtube: "#EF4444", linkedin: "#3B82F6", reddit: "#F97316",
+                  twitter: "#818CF8", instagram: "#F59E0B", tiktok: "#10B981",
+                };
+                const color = PLATFORM_COLORS[item.platform] ?? "#525968";
+
+                const statusStyle: Record<string, { label: string; color: string }> = {
+                  connected:     { label: "Connected",    color: "#34D399" },
+                  auth_expired:  { label: "Reconnect",    color: "#F87171" },
+                  not_connected: { label: isOAuthPlatform ? "Connect" : "N/A", color: "#525968" },
+                };
+                const ss = statusStyle[item.status] ?? statusStyle.not_connected;
+
                 return (
                   <div
-                    key={name}
+                    key={item.platform}
                     className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-3.5 flex items-center gap-3"
                   >
                     <div
                       className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0"
                       style={{ background: `${color}15`, border: `1px solid ${color}30`, color }}
                     >
-                      {name.slice(0, 2)}
+                      {displayName.slice(0, 2)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-[var(--text-primary)]">{name}</p>
-                      <p className="text-[10px] text-[var(--text-muted)] truncate">{handle}</p>
+                      <p className="text-xs font-medium text-[var(--text-primary)]">{displayName}</p>
+                      <p className="text-[10px] text-[var(--text-muted)] truncate">
+                        {item.account_name ?? (item.status === "connected" ? "Connected" : "Not connected")}
+                      </p>
                     </div>
                     <div className="flex flex-col items-end gap-1">
-                      <span className="text-[10px] font-medium" style={{ color: cs.color }}>{cs.label}</span>
-                      <span className="text-[10px] text-[var(--text-muted)]">{posts} posts</span>
+                      {isOAuthPlatform && item.status !== "connected" ? (
+                        <button
+                          onClick={() => handleConnect(item.platform as "youtube" | "linkedin")}
+                          disabled={connectingPlatform === item.platform}
+                          className="text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all"
+                          style={{
+                            background: `${color}20`,
+                            color,
+                            border: `1px solid ${color}30`,
+                            opacity: connectingPlatform === item.platform ? 0.5 : 1,
+                          }}
+                        >
+                          {connectingPlatform === item.platform ? "Redirecting…" : item.status === "auth_expired" ? "Reconnect" : "Connect"}
+                        </button>
+                      ) : isOAuthPlatform && item.status === "connected" ? (
+                        <button
+                          onClick={() => handleDisconnect(item.platform)}
+                          className="text-[10px] font-medium px-2.5 py-1 rounded-lg bg-white/5 text-[var(--text-muted)] hover:text-[#F87171] transition-colors"
+                        >
+                          Disconnect
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-medium" style={{ color: ss.color }}>{ss.label}</span>
+                      )}
                     </div>
                   </div>
                 );
               })}
-              <Button variant="secondary" size="sm" icon={<Plus size={12} />} className="w-full">
-                Add platform
-              </Button>
+              {!platformsLoading && (
+                <Button variant="secondary" size="sm" icon={<Plus size={12} />} className="w-full">
+                  Add platform
+                </Button>
+              )}
             </div>
           )}
         </div>

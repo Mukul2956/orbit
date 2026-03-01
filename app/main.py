@@ -8,7 +8,15 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import analytics_router, queue_router, schedule_router, reddit_router
+from app.api import (
+    analytics_router,
+    queue_router,
+    schedule_router,
+    reddit_router,
+    auth_router,
+    platforms_router,
+    youtube_router,
+)
 from app.config import settings
 
 logging.basicConfig(
@@ -41,6 +49,9 @@ app.include_router(queue_router)
 app.include_router(schedule_router)
 app.include_router(analytics_router)
 app.include_router(reddit_router)
+app.include_router(auth_router)
+app.include_router(platforms_router)
+app.include_router(youtube_router)
 
 
 # ─── Health / status ─────────────────────────────────────────────────────────
