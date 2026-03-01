@@ -65,12 +65,10 @@ class CrossPlatformOrchestrator:
     def _get_publishers(self) -> dict:
         """Lazy-load platform publishers to avoid import cycles."""
         if self._publishers is None:
-            from app.integrations.reddit import RedditPublisher
             from app.integrations.linkedin import LinkedInPublisher
             from app.integrations.youtube import YouTubePublisher
 
             self._publishers = {
-                "reddit": RedditPublisher(),
                 "linkedin": LinkedInPublisher(),
                 "youtube": YouTubePublisher(),
             }
