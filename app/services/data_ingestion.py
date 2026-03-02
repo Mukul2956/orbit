@@ -400,14 +400,14 @@ class DataIngestionService:
         """
         Fetch the user's own LinkedIn UGC posts + per-post social-action counts.
 
-        The OAuth access_token is either supplied by the caller OR looked up
-        from platform_configs.  If neither is available, returns a clear message.
-
-        Engagement formula
+        Scope requirements
         ------------------
-        engagement_rate = (likes + comments) / max(impressions, 1)
-        impressions      reported by the LinkedIn Share Statistics API when available,
-                         otherwise estimated as max(likes * 100, 100)
+        Reading posts (ugcPosts, socialActions) requires the "Share on LinkedIn"
+        product to be approved for your LinkedIn App, which grants w_member_social.
+        Without that approval only openid / profile / email work (OIDC).
+
+        If posts cannot be read due to insufficient scopes this method returns
+        a clear, actionable error instead of a cryptic 403.
         """
         # ── 1. Resolve access token ──────────────────────────────────────
         token = access_token
@@ -441,24 +441,28 @@ class DataIngestionService:
         }
 
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # ── 2. Resolve person URN ────────────────────────────────────
+            # ── 2. Resolve person ID via OIDC userinfo (works with openid+profile) ──
             try:
-                me_resp = await client.get(
-                    f"{_LI_BASE}/me",
-                    headers=headers,
-                    params={"projection": "(id)"},
+                ui_resp = await client.get(
+                    f"{_LI_BASE}/userinfo",
+                    headers={"Authorization": f"Bearer {token}"},
                 )
-                me_resp.raise_for_status()
-                person_id = me_resp.json().get("id", "")
+                ui_resp.raise_for_status()
+                ui = ui_resp.json()
+                person_id = ui.get("sub", "")
+                if not person_id:
+                    raise ValueError("empty sub in userinfo response")
                 author_urn = f"urn:li:person:{person_id}"
             except Exception as exc:
                 return {
                     "platform": "linkedin",
                     "rows_inserted": 0,
-                    "errors": [f"LinkedIn /me failed: {exc}"],
+                    "errors": [f"LinkedIn profile lookup failed: {exc}"],
                 }
 
             # ── 3. Fetch user's UGC posts ────────────────────────────────
+            # Requires w_member_social scope ("Share on LinkedIn" product approval).
+            # If the token doesn't have that scope LinkedIn returns 403.
             try:
                 posts_resp = await client.get(
                     f"{_LI_BASE}/ugcPosts",
@@ -469,6 +473,20 @@ class DataIngestionService:
                         "count": LINKEDIN_LIMIT,
                     },
                 )
+                if posts_resp.status_code == 403:
+                    return {
+                        "platform": "linkedin",
+                        "rows_inserted": 0,
+                        "profile_connected": True,
+                        "profile_name": ui.get("name"),
+                        "errors": [
+                            "LinkedIn account connected ✓  but reading post history requires "
+                            "the 'Share on LinkedIn' product to be approved for your LinkedIn App. "
+                            "Go to linkedin.com/developers/apps → your app → Products tab → "
+                            "request 'Share on LinkedIn'. Once approved (usually instant for test apps), "
+                            "reconnect and pull again. Until then the ML models use the seeded training data."
+                        ],
+                    }
                 posts_resp.raise_for_status()
                 posts = posts_resp.json().get("elements", [])
             except Exception as exc:
@@ -506,7 +524,6 @@ class DataIngestionService:
                     errors.append(f"linkedin/socialActions/{post_urn}: {exc}")
 
                 # ── 5. Share statistics (impressions) ───────────────────
-                # encode the URN for URL usage
                 encoded_urn = post_urn.replace(":", "%3A")
                 try:
                     stats_resp = await client.get(
@@ -526,7 +543,6 @@ class DataIngestionService:
                 except Exception:
                     pass  # impressions are optional
 
-                # Fallback impression estimate
                 if impressions == 0:
                     impressions = max((likes + comments) * 50, 50)
 
