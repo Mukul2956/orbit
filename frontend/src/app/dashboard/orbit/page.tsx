@@ -31,23 +31,22 @@ const MONTHS = ["January","February","March","April","May","June",
 const DEMO_DOTS: Record<number, { color: string; platform: string }[]> = {
   1:  [{ color: "#818CF8", platform: "Twitter" }],
   3:  [{ color: "#3B82F6", platform: "LinkedIn" }, { color: "#F59E0B", platform: "Instagram" }],
-  5:  [{ color: "#10B981", platform: "TikTok" }],
   7:  [{ color: "#818CF8", platform: "Twitter" }, { color: "#3B82F6", platform: "LinkedIn" }],
   10: [{ color: "#818CF8", platform: "Twitter" }],
-  12: [{ color: "#3B82F6", platform: "LinkedIn" }, { color: "#10B981", platform: "TikTok" }],
+  12: [{ color: "#3B82F6", platform: "LinkedIn" }],
   14: [{ color: "#818CF8", platform: "Twitter" }, { color: "#F59E0B", platform: "Instagram" }, { color: "#EF4444", platform: "YouTube" }],
   17: [{ color: "#818CF8", platform: "Twitter" }],
-  19: [{ color: "#F59E0B", platform: "Instagram" }, { color: "#10B981", platform: "TikTok" }],
+  19: [{ color: "#F59E0B", platform: "Instagram" }],
   21: [{ color: "#818CF8", platform: "Twitter" }, { color: "#3B82F6", platform: "LinkedIn" }],
   24: [{ color: "#F59E0B", platform: "Instagram" }],
-  26: [{ color: "#818CF8", platform: "Twitter" }, { color: "#10B981", platform: "TikTok" }],
+  26: [{ color: "#818CF8", platform: "Twitter" }],
   28: [{ color: "#3B82F6", platform: "LinkedIn" }],
   31: [{ color: "#818CF8", platform: "Twitter" }, { color: "#F59E0B", platform: "Instagram" }],
 };
 
 const PLATFORM_COLORS: Record<string, string> = {
   youtube: "#EF4444", linkedin: "#3B82F6", reddit: "#F97316",
-  twitter: "#818CF8", instagram: "#F59E0B", tiktok: "#10B981",
+  twitter: "#818CF8", instagram: "#F59E0B",
 };
 
 const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }> = {
@@ -427,11 +426,10 @@ export default function OrbitPage() {
           {/* Legend */}
           <div className="flex items-center gap-4 mt-3 pt-3 border-t border-[var(--border)]">
             {[
-              { label: "Twitter", color: "#818CF8" },
-              { label: "LinkedIn",color: "#3B82F6" },
-              { label: "Instagram",color: "#F59E0B" },
-              { label: "TikTok",  color: "#10B981" },
-              { label: "YouTube", color: "#EF4444" },
+              { label: "Twitter",   color: "#818CF8" },
+              { label: "LinkedIn",  color: "#3B82F6" },
+              { label: "Instagram", color: "#F59E0B" },
+              { label: "YouTube",   color: "#EF4444" },
             ].map(({ label, color }) => (
               <div key={label} className="flex items-center gap-1.5">
                 <div className="w-2 h-2 rounded-full" style={{ background: color }} />
@@ -1172,10 +1170,10 @@ export default function OrbitPage() {
                 <div>
                   <label className="text-[11px] font-medium text-[var(--text-muted)] mb-2 block">Platforms <span className="text-[#F87171]">*</span></label>
                   <div className="flex flex-wrap gap-2">
-                    {(["linkedin","youtube","reddit","twitter","instagram","tiktok"] as const).map(p => {
+                    {(["linkedin","youtube","reddit","twitter","instagram"] as const).map(p => {
                       const color = PLATFORM_COLORS[p] ?? "#525968";
                       const selected = modalPlatforms.includes(p);
-                      const label = { linkedin:"LinkedIn", youtube:"YouTube", reddit:"Reddit", twitter:"Twitter", instagram:"Instagram", tiktok:"TikTok" }[p];
+                      const label = { linkedin:"LinkedIn", youtube:"YouTube", reddit:"Reddit", twitter:"Twitter", instagram:"Instagram" }[p];
                       return (
                         <button key={p} type="button"
                           onClick={() => setModalPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}
