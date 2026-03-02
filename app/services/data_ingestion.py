@@ -436,10 +436,11 @@ class DataIngestionService:
         errors: list[str] = []
         # auth_headers: plain bearer — works for all v2 + OIDC endpoints
         auth_headers = {"Authorization": f"Bearer {token}"}
-        # rest_headers: required for the new 2023+ LinkedIn REST API
+        # rest_headers: required for the new LinkedIn REST API
+        # LinkedIn-Version must be within a rolling 12-month window from today
         rest_headers = {
             "Authorization": f"Bearer {token}",
-            "LinkedIn-Version": "202304",
+            "LinkedIn-Version": "202502",
             "X-Restli-Protocol-Version": "2.0.0",
         }
 
