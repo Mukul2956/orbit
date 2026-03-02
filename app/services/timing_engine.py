@@ -121,7 +121,7 @@ class TimingEngine:
         results = []
         for rank, ((dow, hour), score) in enumerate(grouped.items(), 1):
             days_ahead = (int(dow) - now.weekday()) % 7
-            if days_ahead == 0 and now.hour >= hour:
+            if days_ahead == 0 and now.hour >= int(hour):
                 days_ahead = 7
             t = (now + timedelta(days=days_ahead)).replace(hour=int(hour), minute=0, second=0, microsecond=0)
             results.append({"rank": rank, "time": t, "score": float(score)})
@@ -250,6 +250,7 @@ class TimingEngine:
         # Best hour-of-week cell
         grouped = df.groupby(["dow", "hour"])["eng"].mean()
         best_dow, best_hour = grouped.idxmax()
+        best_dow, best_hour = int(best_dow), int(best_hour)  # numpy.int32 → Python int
 
         overall_mean = float(df["eng"].mean())
         overall_std  = float(df["eng"].std()) or 1e-6
