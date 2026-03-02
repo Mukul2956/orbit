@@ -274,3 +274,107 @@ export async function fetchIngestStatus(userId: string): Promise<IngestStatus> {
   if (!res.ok) throw new Error(`Ingest status API error ${res.status}`);
   return res.json();
 }
+
+// ─── Dashboard stats ──────────────────────────────────────────────────────────
+
+export interface DashboardStats {
+  total_published: number;
+  total_scheduled: number;
+  avg_engagement_score: number;
+  top_platform: string | null;
+}
+
+export async function fetchDashboardStats(
+  userId: string,
+  days = 30
+): Promise<DashboardStats> {
+  const res = await fetch(
+    `${API_BASE}/api/v1/analytics/dashboard/${userId}?days=${days}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(`Dashboard stats API error ${res.status}`);
+  return res.json();
+}
+
+// ─── Heatmap ──────────────────────────────────────────────────────────────────
+
+export interface HeatmapPoint {
+  day_of_week: number;   // 0 = Mon … 6 = Sun
+  hour_of_day: number;   // 0–23
+  avg_engagement: number;
+}
+
+export async function fetchHeatmap(
+  userId: string,
+  platform = "linkedin"
+): Promise<HeatmapPoint[]> {
+  const res = await fetch(
+    `${API_BASE}/api/v1/analytics/heatmap/${userId}?platform=${platform}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(`Heatmap API error ${res.status}`);
+  return res.json();
+}
+
+// ─── Content Drafts ───────────────────────────────────────────────────────────
+
+export type ContentType = "text" | "image" | "video" | "carousel" | "thread" | "article" | "email";
+export type DraftStatus  = "draft" | "queued" | "published" | "archived";
+
+export interface DraftResponse {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string | null;
+  content_type: ContentType;
+  status: DraftStatus;
+  is_evergreen: boolean;
+  is_time_sensitive: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QueuedDraftResponse {
+  draft: DraftResponse;
+  optimal_publish_time: string | null;
+  platforms: string[];
+  queue_id: string | null;
+}
+
+export async function createDraft(body: {
+  user_id: string;
+  title: string;
+  body?: string;
+  content_type?: ContentType;
+  is_evergreen?: boolean;
+  is_time_sensitive?: boolean;
+}): Promise<DraftResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/content/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Create draft error ${res.status}`);
+  return res.json();
+}
+
+export async function queueDraft(
+  contentId: string,
+  opts: { platforms: string[]; is_time_sensitive?: boolean }
+): Promise<QueuedDraftResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/content/${contentId}/queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) throw new Error(`Queue draft error ${res.status}`);
+  return res.json();
+}
+
+export async function fetchUserDrafts(userId: string): Promise<DraftResponse[]> {
+  const res = await fetch(`${API_BASE}/api/v1/content/user/${userId}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Fetch drafts error ${res.status}`);
+  return res.json();
+}

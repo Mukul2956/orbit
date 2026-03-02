@@ -29,12 +29,14 @@ class LinkedInPublisher(PlatformPublisher):
 
         # Get author URN (person or organisation)
         async with httpx.AsyncClient() as client:
+            # Use OIDC userinfo endpoint — works with openid+profile scopes
+            # /v2/me requires r_liteprofile which is restricted
             me_resp = await client.get(
-                f"{LINKEDIN_URL}/me",
+                f"{LINKEDIN_URL.replace('/v2', '')}/v2/userinfo",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             me_resp.raise_for_status()
-            person_id = me_resp.json()["id"]
+            person_id = me_resp.json().get("sub", "")
             author_urn = f"urn:li:person:{person_id}"
 
             payload = {

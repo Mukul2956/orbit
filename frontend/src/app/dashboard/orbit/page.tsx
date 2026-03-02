@@ -5,6 +5,7 @@ import {
   Plus, MoreHorizontal, ChevronLeft, ChevronRight, RefreshCw,
   TrendingUp, MessageSquare, ArrowUp, Search, ExternalLink,
   Eye, ThumbsUp, Youtube, Download, CheckCircle2, Database,
+  X, Send, Loader2, Flame,
 } from "lucide-react";
 import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -12,8 +13,12 @@ import {
   fetchRedditTrending, fetchPlatformStatus, getOAuthUrl, disconnectPlatform,
   fetchYouTubeTrending, searchYouTube, fetchOptimalTime,
   triggerIngest, fetchIngestStatus,
+  fetchUserQueue, fetchDashboardStats, fetchHeatmap,
+  createDraft, queueDraft, fetchUserDrafts,
   type RedditPost, type PlatformStatus, type YouTubeVideo, type OptimalTimeResponse,
   type IngestStatus, type IngestResult, type IngestAllResult,
+  type QueueEntry, type DashboardStats, type HeatmapPoint,
+  type DraftResponse, type ContentType,
 } from "@/lib/api";
 
 // ─── Demo user (replace with real auth session later) ─────────────────────────
@@ -39,15 +44,6 @@ const DEMO_DOTS: Record<number, { color: string; platform: string }[]> = {
   28: [{ color: "#3B82F6", platform: "LinkedIn" }],
   31: [{ color: "#818CF8", platform: "Twitter" }, { color: "#F59E0B", platform: "Instagram" }],
 };
-
-const DEMO_QUEUE = [
-  { title: "Why Agentic AI Is Changing Work", platform: "LinkedIn",   scheduledAt: "Today, 9:00 AM",    status: "live",      type: "Article"  },
-  { title: "5 Habits of High-Output Teams",   platform: "Twitter",    scheduledAt: "Today, 12:30 PM",   status: "scheduled", type: "Thread"   },
-  { title: "Spring Campaign — Look 1",         platform: "Instagram",  scheduledAt: "Today, 3:00 PM",    status: "scheduled", type: "Carousel" },
-  { title: "Local-First SaaS Breakdown",      platform: "LinkedIn",   scheduledAt: "Tomorrow, 8:00 AM", status: "scheduled", type: "Article"  },
-  { title: "Biohacking for Busy People",      platform: "TikTok",     scheduledAt: "Mar 3, 6:00 PM",    status: "paused",    type: "Video"    },
-  { title: "Quiet Luxury Roundup",             platform: "Newsletter", scheduledAt: "Mar 4, 10:00 AM",   status: "draft",     type: "Email"    },
-];
 
 const PLATFORM_COLORS: Record<string, string> = {
   youtube: "#EF4444", linkedin: "#3B82F6", reddit: "#F97316",
@@ -94,6 +90,98 @@ export default function OrbitPage() {
   }
 
   const [activeTab, setActiveTab] = useState<Tab>("queue");
+
+  // ── Live Queue ─────────────────────────────────────────────────────────────
+  const [liveQueue, setLiveQueue]         = useState<DraftResponse[]>([]);
+  const [queueLoading, setQueueLoading]   = useState(true);
+
+  const loadQueue = useCallback(async () => {
+    setQueueLoading(true);
+    try {
+      const drafts = await fetchUserDrafts(DEMO_USER_ID);
+      setLiveQueue(drafts);
+    } catch { /* silent — show empty */ }
+    finally { setQueueLoading(false); }
+  }, []);
+
+  useEffect(() => { loadQueue(); }, [loadQueue]);
+
+  // ── Dashboard Stats ────────────────────────────────────────────────────────
+  const [dashStats, setDashStats]         = useState<DashboardStats | null>(null);
+
+  const loadDashStats = useCallback(async () => {
+    try {
+      const s = await fetchDashboardStats(DEMO_USER_ID);
+      setDashStats(s);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { loadDashStats(); }, [loadDashStats]);
+
+  // ── Heatmap ────────────────────────────────────────────────────────────────
+  const [heatmapData, setHeatmapData]     = useState<HeatmapPoint[]>([]);
+  const [heatmapPlatform, setHeatmapPlatform] = useState("linkedin");
+
+  const loadHeatmap = useCallback(async (platform: string) => {
+    try {
+      const data = await fetchHeatmap(DEMO_USER_ID, platform);
+      setHeatmapData(Array.isArray(data) ? data : []);
+    } catch { setHeatmapData([]); }
+  }, []);
+
+  useEffect(() => { loadHeatmap(heatmapPlatform); }, [heatmapPlatform, loadHeatmap]);
+
+  // ── Schedule Post modal ────────────────────────────────────────────────────
+  const [showModal, setShowModal]         = useState(false);
+  const [modalTitle, setModalTitle]       = useState("");
+  const [modalBody, setModalBody]         = useState("");
+  const [modalType, setModalType]         = useState<ContentType>("text");
+  const [modalPlatforms, setModalPlatforms] = useState<string[]>(["linkedin"]);
+  const [modalEvergreen, setModalEvergreen] = useState(false);
+  const [modalTimeSensitive, setModalTimeSensitive] = useState(false);
+  const [modalSubmitting, setModalSubmitting] = useState(false);
+  const [modalError, setModalError]       = useState<string | null>(null);
+  const [modalSuccess, setModalSuccess]   = useState<string | null>(null);
+
+  const handleScheduleSubmit = useCallback(async () => {
+    if (!modalTitle.trim()) { setModalError("Title is required"); return; }
+    if (modalPlatforms.length === 0) { setModalError("Select at least one platform"); return; }
+    setModalSubmitting(true); setModalError(null); setModalSuccess(null);
+    try {
+      const draft = await createDraft({
+        user_id: DEMO_USER_ID,
+        title: modalTitle,
+        body: modalBody || undefined,
+        content_type: modalType,
+        is_evergreen: modalEvergreen,
+        is_time_sensitive: modalTimeSensitive,
+      });
+      const result = await queueDraft(draft.id, {
+        platforms: modalPlatforms,
+        is_time_sensitive: modalTimeSensitive,
+      });
+      const timeStr = result.optimal_publish_time
+        ? new Date(result.optimal_publish_time).toLocaleString("en-US", {
+            weekday: "short", month: "short", day: "numeric",
+            hour: "2-digit", minute: "2-digit",
+          })
+        : "to be determined";
+      setModalSuccess(`Queued! Optimal publish time: ${timeStr} on ${result.platforms.join(", ")}`);
+      await loadQueue();
+      await loadDashStats();
+      // Reset form after 3s
+      setTimeout(() => {
+        setShowModal(false);
+        setModalTitle(""); setModalBody(""); setModalType("text");
+        setModalPlatforms(["linkedin"]); setModalEvergreen(false);
+        setModalTimeSensitive(false); setModalSuccess(null);
+      }, 3000);
+    } catch (e: unknown) {
+      setModalError(e instanceof Error ? e.message : "Failed to schedule post");
+    } finally {
+      setModalSubmitting(false);
+    }
+  }, [modalTitle, modalBody, modalType, modalPlatforms, modalEvergreen, modalTimeSensitive, loadQueue, loadDashStats]);
 
   // ── Reddit ─────────────────────────────────────────────────────────────────
   const [redditPosts, setRedditPosts]       = useState<RedditPost[]>([]);
@@ -262,7 +350,9 @@ export default function OrbitPage() {
               {platformsLoading ? "…" : `${connectedCount} platform${connectedCount !== 1 ? "s" : ""} connected`}
             </span>
           </div>
-          <Button variant="primary" size="md" icon={<Plus size={13} />} className="bg-[#3B82F6] hover:bg-[#60A5FA] hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
+          <Button variant="primary" size="md" icon={<Plus size={13} />}
+            onClick={() => setShowModal(true)}
+            className="bg-[#3B82F6] hover:bg-[#60A5FA] hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
             Schedule post
           </Button>
         </div>
@@ -271,10 +361,10 @@ export default function OrbitPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
-          { label: "Published this month", value: "163",  color: "#34D399" },
-          { label: "Scheduled",            value: "48",   color: "#60A5FA" },
-          { label: "Platforms connected",  value: platformsLoading ? "…" : `${connectedCount}/${totalPlatforms}`, color: "#3B82F6" },
-          { label: "Avg. best time score", value: "92%",  color: "#FBBF24" },
+          { label: "Published this month",  value: dashStats ? String(dashStats.total_published)  : "…", color: "#34D399" },
+          { label: "Scheduled",             value: dashStats ? String(dashStats.total_scheduled)  : "…", color: "#60A5FA" },
+          { label: "Platforms connected",   value: platformsLoading ? "…" : `${connectedCount}/${totalPlatforms}`, color: "#3B82F6" },
+          { label: "Avg. engagement score", value: dashStats ? `${Math.round(dashStats.avg_engagement_score * 100)}%` : "…", color: "#FBBF24" },
         ].map(({ label, value, color }) => (
           <Card key={label} padding="md">
             <p className="text-xs text-[var(--text-muted)] mb-2">{label}</p>
@@ -372,37 +462,49 @@ export default function OrbitPage() {
 
           {activeTab === "queue" && (
             <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[420px] pr-0.5">
-              {DEMO_QUEUE.map(({ title, platform, scheduledAt, status, type }) => {
-                const s = STATUS_STYLE[status] ?? STATUS_STYLE.draft;
-                const pColor = PLATFORM_COLORS[platform.toLowerCase()] ?? "#525968";
+              {queueLoading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-[72px] rounded-xl bg-white/[0.03] border border-[var(--border)] animate-pulse" />
+                ))
+              ) : liveQueue.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-[var(--border)] flex items-center justify-center">
+                    <Calendar size={16} className="text-[var(--text-muted)]" />
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]">No posts yet — schedule your first one!</p>
+                  <button onClick={() => setShowModal(true)}
+                    className="text-xs font-medium text-[#60A5FA] hover:underline">
+                    + Schedule post
+                  </button>
+                </div>
+              ) : liveQueue.map((draft) => {
+                const s = STATUS_STYLE[draft.status] ?? STATUS_STYLE.draft;
                 return (
-                  <div
-                    key={title}
-                    className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-3.5 hover:border-[var(--border-strong)] transition-all"
-                  >
+                  <div key={draft.id}
+                    className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-3.5 hover:border-[var(--border-strong)] transition-all">
                     <div className="flex items-start gap-2 mb-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-[var(--text-primary)] truncate">{title}</p>
+                        <p className="text-xs font-medium text-[var(--text-primary)] truncate">{draft.title}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[10px] font-medium" style={{ color: pColor }}>{platform}</span>
-                          <span className="text-[10px] text-[var(--text-muted)]">·</span>
-                          <span className="text-[10px] text-[var(--text-muted)]">{type}</span>
+                          <span className="text-[10px] font-medium text-[var(--text-muted)] capitalize">{draft.content_type}</span>
+                          {draft.is_evergreen && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[rgba(52,211,153,0.1)] text-[#34D399]">Evergreen</span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        <span
-                          className="text-[10px] font-medium px-2 py-0.5 rounded-full"
-                          style={{ color: s.color, background: s.bg }}
-                        >
-                          {s.label}
-                        </span>
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+                          style={{ color: s.color, background: s.bg }}>{s.label}</span>
                         <button className="p-1 hover:bg-white/5 rounded-md text-[var(--text-muted)] transition-colors">
                           <MoreHorizontal size={12} />
                         </button>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                      <Clock size={9} />{scheduledAt}
+                      <Clock size={9} />
+                      {new Date(draft.created_at).toLocaleString("en-US", {
+                        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                      })}
                     </div>
                   </div>
                 );
@@ -775,6 +877,91 @@ export default function OrbitPage() {
         </div>
       </section>
 
+      {/* ── Engagement Heatmap ────────────────────────────────────────────── */}
+      <section className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Flame size={15} className="text-[#F97316]" />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Audience Heatmap</h2>
+            <span className="text-[10px] text-[var(--text-muted)] bg-white/5 px-2 py-0.5 rounded-full">
+              Best hours to post · last 90 days
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {["linkedin", "youtube", "reddit"].map(p => (
+              <button key={p}
+                onClick={() => setHeatmapPlatform(p)}
+                className={`text-[10px] px-2 py-1 rounded-md font-medium capitalize transition-all ${
+                  heatmapPlatform === p
+                    ? "text-white"
+                    : "bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                }`}
+                style={heatmapPlatform === p ? { background: PLATFORM_COLORS[p] } : {}}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {heatmapData.length === 0 ? (
+          <div className="flex items-center gap-3 px-4 py-6 rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] text-xs text-[var(--text-muted)]">
+            <AlertCircle size={13} />
+            No heatmap data yet — sync data from the Data Sync panel below, then check back.
+          </div>
+        ) : (() => {
+          // Build a day×hour matrix
+          const maxVal = Math.max(...heatmapData.map(p => p.avg_engagement), 0.001);
+          const matrix: Record<number, Record<number, number>> = {};
+          heatmapData.forEach(p => {
+            if (!matrix[p.day_of_week]) matrix[p.day_of_week] = {};
+            matrix[p.day_of_week][p.hour_of_day] = p.avg_engagement;
+          });
+          const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+          const color = PLATFORM_COLORS[heatmapPlatform] ?? "#60A5FA";
+
+          return (
+            <div className="overflow-x-auto">
+              <div className="min-w-[520px]">
+                {/* Hour axis */}
+                <div className="flex mb-1 ml-8">
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <div key={h} className="flex-1 text-center text-[8px] text-[var(--text-muted)]">
+                      {h % 3 === 0 ? `${h}h` : ""}
+                    </div>
+                  ))}
+                </div>
+                {dayLabels.map((day, di) => (
+                  <div key={day} className="flex items-center gap-1 mb-0.5">
+                    <span className="w-7 text-[9px] text-[var(--text-muted)] flex-shrink-0 text-right pr-1">{day}</span>
+                    {Array.from({ length: 24 }, (_, h) => {
+                      const val = matrix[di]?.[h] ?? 0;
+                      const intensity = val / maxVal;
+                      return (
+                        <div key={h} className="flex-1 aspect-square rounded-sm transition-all"
+                          style={{ background: `${color}${Math.round(intensity * 220 + 12).toString(16).padStart(2, "0")}` }}
+                          title={`${day} ${h}:00 — engagement ${(val * 100).toFixed(1)}%`}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[9px] text-[var(--text-muted)]">Low</span>
+                  <div className="flex gap-0.5">
+                    {Array.from({ length: 8 }, (_, i) => (
+                      <div key={i} className="w-4 h-2.5 rounded-sm"
+                        style={{ background: `${color}${Math.round((i / 7) * 220 + 12).toString(16).padStart(2, "0")}` }} />
+                    ))}
+                  </div>
+                  <span className="text-[9px] text-[var(--text-muted)]">High</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </section>
+
       {/* ── Data Sync ─────────────────────────────────────────────────────── */}
       <section className="mt-8">
         <div className="flex items-center justify-between mb-4">
@@ -902,6 +1089,123 @@ export default function OrbitPage() {
           After syncing Reddit + YouTube, re-run <code className="font-mono text-[10px] bg-white/5 px-1 py-0.5 rounded">python scripts/train_models.py</code> to retrain LightGBM on the real data.
         </div>
       </section>
+
+      {/* ── Schedule Post Modal ───────────────────────────────────────────── */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }}>
+          <div className="w-full max-w-lg bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-2xl p-6">
+            {/* Modal header */}
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[rgba(59,130,246,0.1)] border border-[rgba(59,130,246,0.25)] flex items-center justify-center">
+                  <Send size={14} className="text-[#60A5FA]" />
+                </div>
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">Schedule Post</h2>
+              </div>
+              <button onClick={() => { setShowModal(false); setModalError(null); setModalSuccess(null); }}
+                className="p-1.5 hover:bg-white/5 rounded-lg text-[var(--text-muted)] transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            {modalSuccess ? (
+              <div className="flex flex-col items-center gap-4 py-6">
+                <div className="w-12 h-12 rounded-full bg-[rgba(52,211,153,0.12)] border border-[rgba(52,211,153,0.3)] flex items-center justify-center">
+                  <CheckCircle2 size={22} className="text-[#34D399]" />
+                </div>
+                <p className="text-sm text-[#34D399] text-center font-medium">{modalSuccess}</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {/* Title */}
+                <div>
+                  <label className="text-[11px] font-medium text-[var(--text-muted)] mb-1.5 block">Title <span className="text-[#F87171]">*</span></label>
+                  <input value={modalTitle} onChange={e => setModalTitle(e.target.value)}
+                    placeholder="Post title or headline…"
+                    className="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[#3B82F6] transition-colors" />
+                </div>
+
+                {/* Body */}
+                <div>
+                  <label className="text-[11px] font-medium text-[var(--text-muted)] mb-1.5 block">Body <span className="text-[var(--text-muted)]">(optional)</span></label>
+                  <textarea value={modalBody} onChange={e => setModalBody(e.target.value)}
+                    rows={3} placeholder="Post content…"
+                    className="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[#3B82F6] transition-colors resize-none" />
+                </div>
+
+                {/* Content type + options row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-[var(--text-muted)] mb-1.5 block">Content type</label>
+                    <select value={modalType} onChange={e => setModalType(e.target.value as ContentType)}
+                      className="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[#3B82F6] transition-colors">
+                      {(["text","thread","article","image","carousel","video","email"] as ContentType[]).map(t => (
+                        <option key={t} value={t} className="capitalize">{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2 justify-end pb-1">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <div onClick={() => setModalEvergreen(v => !v)}
+                        className={`w-8 h-4 rounded-full transition-colors flex items-center ${modalEvergreen ? "bg-[#34D399]" : "bg-white/10"}`}>
+                        <div className={`w-3 h-3 rounded-full bg-white transition-transform mx-0.5 ${modalEvergreen ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-[11px] text-[var(--text-muted)]">Evergreen</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <div onClick={() => setModalTimeSensitive(v => !v)}
+                        className={`w-8 h-4 rounded-full transition-colors flex items-center ${modalTimeSensitive ? "bg-[#FBBF24]" : "bg-white/10"}`}>
+                        <div className={`w-3 h-3 rounded-full bg-white transition-transform mx-0.5 ${modalTimeSensitive ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                      <span className="text-[11px] text-[var(--text-muted)]">Time sensitive</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Platforms */}
+                <div>
+                  <label className="text-[11px] font-medium text-[var(--text-muted)] mb-2 block">Platforms <span className="text-[#F87171]">*</span></label>
+                  <div className="flex flex-wrap gap-2">
+                    {(["linkedin","youtube","reddit","twitter","instagram","tiktok"] as const).map(p => {
+                      const color = PLATFORM_COLORS[p] ?? "#525968";
+                      const selected = modalPlatforms.includes(p);
+                      const label = { linkedin:"LinkedIn", youtube:"YouTube", reddit:"Reddit", twitter:"Twitter", instagram:"Instagram", tiktok:"TikTok" }[p];
+                      return (
+                        <button key={p} type="button"
+                          onClick={() => setModalPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}
+                          className="text-[11px] font-medium px-2.5 py-1 rounded-lg transition-all"
+                          style={selected ? { background: `${color}20`, color, border: `1px solid ${color}50` } : { background: "rgba(255,255,255,0.04)", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+                        >{label}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Error */}
+                {modalError && (
+                  <div className="flex items-center gap-2 text-xs text-[#F87171] bg-[rgba(248,113,113,0.08)] border border-[rgba(248,113,113,0.2)] rounded-lg px-3 py-2">
+                    <AlertCircle size={12} /> {modalError}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={() => { setShowModal(false); setModalError(null); }}
+                    className="flex-1 py-2 text-sm rounded-lg bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">
+                    Cancel
+                  </button>
+                  <button onClick={handleScheduleSubmit} disabled={modalSubmitting}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg bg-[#3B82F6] hover:bg-[#60A5FA] text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                    {modalSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={13} />}
+                    {modalSubmitting ? "Scheduling…" : "Schedule"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

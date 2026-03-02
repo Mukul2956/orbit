@@ -104,6 +104,49 @@ async def get_audience_heatmap(
     return heatmap
 
 
+@router.get("/dashboard/{user_id}")
+async def get_dashboard_stats(
+    user_id: uuid.UUID,
+    days: int = Query(default=30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+):
+    """One-shot endpoint for the Orbit dashboard header stats."""
+    from sqlalchemy import func as sqlfunc
+    from app.models.content_queue import ContentQueue
+    from app.models.distribution_log import DistributionLog
+    from app.models.platform_performance import PlatformPerformance
+
+    log_stmt = select(sqlfunc.count()).select_from(DistributionLog).where(
+        DistributionLog.action == "success",
+        DistributionLog.timestamp >= datetime.utcnow() - timedelta(days=days),
+    )
+    published = (await db.execute(log_stmt)).scalar_one()
+
+    sched_stmt = select(sqlfunc.count()).select_from(ContentQueue).where(
+        ContentQueue.user_id == user_id,
+        ContentQueue.status.in_(["pending", "scheduled"]),
+    )
+    scheduled = (await db.execute(sched_stmt)).scalar_one()
+
+    perf_stmt = select(PlatformPerformance).where(
+        PlatformPerformance.user_id == user_id,
+        PlatformPerformance.recorded_at >= datetime.utcnow() - timedelta(days=days),
+    )
+    perf_rows = (await db.execute(perf_stmt)).scalars().all()
+    avg_eng = round(sum(r.engagement_score for r in perf_rows) / len(perf_rows), 4) if perf_rows else 0.0
+    platform_counts: dict[str, int] = {}
+    for r in perf_rows:
+        platform_counts[r.platform] = platform_counts.get(r.platform, 0) + 1
+    top_platform = max(platform_counts, key=platform_counts.get) if platform_counts else None
+
+    return {
+        "total_published": published,
+        "total_scheduled": scheduled,
+        "avg_engagement_score": avg_eng,
+        "top_platform": top_platform,
+    }
+
+
 @router.get("/algorithm-changes/{platform}", response_model=list[AlgorithmChangeResponse])
 async def get_algorithm_changes(
     platform: str,
