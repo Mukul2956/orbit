@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: orbit-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free          # change to "starter" for production
+    region: oregon      # closest to most users; options: oregon, frankfurt, singapore
+    envVars:
+      # ── App ────────────────────────────────────────────────────────────────
+      - key: APP_TITLE
+        value: "ORBIT – Intelligent Distribution & Scheduling Nexus"
+      - key: APP_VERSION
+        value: "1.0.0"
+      - key: LOG_LEVEL
+        value: info
+
+      # ── Database (Supabase) ─────────────────────────────────────────────────
+      - key: DATABASE_URL
+        sync: false       # you'll paste this in the Render dashboard
+
+      # ── Reddit OAuth ────────────────────────────────────────────────────────
+      - key: REDDIT_CLIENT_ID
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_USER_AGENT
+        sync: false
+
+      # ── LinkedIn OAuth ──────────────────────────────────────────────────────
+      - key: LINKEDIN_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false
+
+      # ── YouTube / Google OAuth ──────────────────────────────────────────────
+      - key: YOUTUBE_CLIENT_ID
+        sync: false
+      - key: YOUTUBE_CLIENT_SECRET
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+
+      # ── JWT / Auth ──────────────────────────────────────────────────────────
+      - key: SECRET_KEY
+        generateValue: true   # Render auto-generates a secure random value
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+
+      # ── Port (Render's internal routing) ───────────────────────────────────
+      - key: PORT
+        value: "8000"
