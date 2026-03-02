@@ -322,6 +322,7 @@ export default function OrbitPage() {
       setIngestingPlatform(null);
     }
   }, [loadIngestStatus, loadTiming]);
+  useEffect(() => { loadReddit(subreddit, searchQuery); }, [subreddit, searchQuery, loadReddit]);
   useEffect(() => { loadYouTube(ytMode, ytQuery, ytRegion, ytCat); }, [ytMode, ytQuery, ytRegion, ytCat, loadYouTube]);
   useEffect(() => { loadPlatformStatus(); }, [loadPlatformStatus]);
 
@@ -911,11 +912,11 @@ export default function OrbitPage() {
           </div>
         ) : (() => {
           // Build a day×hour matrix
-          const maxVal = Math.max(...heatmapData.map(p => p.avg_engagement), 0.001);
+          const maxVal = Math.max(...heatmapData.map(p => p.engagement_rate), 0.001);
           const matrix: Record<number, Record<number, number>> = {};
           heatmapData.forEach(p => {
             if (!matrix[p.day_of_week]) matrix[p.day_of_week] = {};
-            matrix[p.day_of_week][p.hour_of_day] = p.avg_engagement;
+            matrix[p.day_of_week][p.hour] = p.engagement_rate;
           });
           const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
           const color = PLATFORM_COLORS[heatmapPlatform] ?? "#60A5FA";

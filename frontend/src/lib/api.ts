@@ -300,8 +300,9 @@ export async function fetchDashboardStats(
 
 export interface HeatmapPoint {
   day_of_week: number;   // 0 = Mon … 6 = Sun
-  hour_of_day: number;   // 0–23
-  avg_engagement: number;
+  hour: number;          // 0–23
+  engagement_rate: number;
+  reach: number;
 }
 
 export async function fetchHeatmap(
