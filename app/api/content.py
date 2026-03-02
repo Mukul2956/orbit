@@ -36,7 +36,7 @@ class DraftCreate(BaseModel):
     content_type: str = "text"
     is_evergreen: bool = False
     is_time_sensitive: bool = False
-    metadata: dict = Field(default_factory=dict)
+    post_metadata: dict = Field(default_factory=dict)
 
 
 class DraftUpdate(BaseModel):
@@ -45,7 +45,7 @@ class DraftUpdate(BaseModel):
     content_type: str | None = None
     is_evergreen: bool | None = None
     is_time_sensitive: bool | None = None
-    metadata: dict | None = None
+    post_metadata: dict | None = None
 
 
 class DraftQueueRequest(BaseModel):
@@ -63,7 +63,7 @@ class DraftResponse(BaseModel):
     status: str
     is_evergreen: bool
     is_time_sensitive: bool
-    metadata: dict
+    post_metadata: dict
     created_at: datetime
     updated_at: datetime
 
@@ -91,7 +91,7 @@ async def create_draft(body: DraftCreate, db: AsyncSession = Depends(get_db)):
         content_type=body.content_type,
         is_evergreen=body.is_evergreen,
         is_time_sensitive=body.is_time_sensitive,
-        metadata=body.metadata,
+        post_metadata=body.post_metadata,
         status="draft",
     )
     db.add(draft)
