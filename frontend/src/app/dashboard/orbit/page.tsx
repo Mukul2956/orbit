@@ -742,7 +742,12 @@ export default function OrbitPage() {
                   {video.thumbnail ? (
                     <div className="relative w-full aspect-video bg-black overflow-hidden">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={video.thumbnail} alt={video.title ?? ""} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      <img
+                        src={video.thumbnail}
+                        alt={video.title ?? ""}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                         <Youtube size={24} className="text-white opacity-0 group-hover:opacity-80 transition-opacity" />
                       </div>

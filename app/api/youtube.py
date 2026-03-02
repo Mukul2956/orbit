@@ -80,7 +80,10 @@ async def search_videos(
         snippet = item.get("snippet", {})
         thumbs = snippet.get("thumbnails", {})
         thumb = (
-            thumbs.get("medium", {}).get("url")
+            thumbs.get("maxres", {}).get("url")
+            or thumbs.get("standard", {}).get("url")
+            or thumbs.get("high", {}).get("url")
+            or thumbs.get("medium", {}).get("url")
             or thumbs.get("default", {}).get("url")
         )
         stats = stats_by_id.get(vid_id, {})
@@ -133,7 +136,13 @@ async def get_trending_videos(
         snippet = item.get("snippet", {})
         stats = item.get("statistics", {})
         thumbs = snippet.get("thumbnails", {})
-        thumb = thumbs.get("medium", {}).get("url") or thumbs.get("default", {}).get("url")
+        thumb = (
+            thumbs.get("maxres", {}).get("url")
+            or thumbs.get("standard", {}).get("url")
+            or thumbs.get("high", {}).get("url")
+            or thumbs.get("medium", {}).get("url")
+            or thumbs.get("default", {}).get("url")
+        )
         results.append({
             "id": item["id"],
             "title": snippet.get("title"),
