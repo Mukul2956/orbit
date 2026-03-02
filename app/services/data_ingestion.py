@@ -398,16 +398,16 @@ class DataIngestionService:
         access_token: str | None = None,
     ) -> dict[str, Any]:
         """
-        Fetch the user's own LinkedIn UGC posts + per-post social-action counts.
+        Verify LinkedIn connection is live and confirm timing data is available.
 
-        Scope requirements
-        ------------------
-        Reading posts (ugcPosts, socialActions) requires the "Share on LinkedIn"
-        product to be approved for your LinkedIn App, which grants w_member_social.
-        Without that approval only openid / profile / email work (OIDC).
+        NOTE: LinkedIn's Post History API (/v2/ugcPosts, /rest/posts) requires
+        the `r_member_social` scope which is only available to LinkedIn Marketing
+        API partners — not standard developer apps. `w_member_social` (Share on
+        LinkedIn product) only grants write access, not read access to post history.
 
-        If posts cannot be read due to insufficient scopes this method returns
-        a clear, actionable error instead of a cryptic 403.
+        Instead of failing, we verify the OAuth token is alive via /v2/userinfo
+        and report that the TimingEngine will use the seeded industry-standard
+        LinkedIn engagement patterns already in the DB.
         """
         # ── 1. Resolve access token ──────────────────────────────────────
         token = access_token
@@ -432,18 +432,8 @@ class DataIngestionService:
                 ],
             }
 
-        inserted = 0
-        errors: list[str] = []
-        # v2_headers: correct for the LinkedIn v2 API — NO LinkedIn-Version header
-        # (LinkedIn-Version only belongs on the newer /rest/* endpoints which
-        # require a higher API tier; /v2/ugcPosts works with w_member_social scope)
-        v2_headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Restli-Protocol-Version": "2.0.0",
-        }
-
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # ── 2. Resolve person ID via OIDC userinfo (works with openid+profile) ──
+        # ── 2. Verify token is alive via OIDC userinfo ───────────────────
+        async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 ui_resp = await client.get(
                     f"{_LI_BASE}/userinfo",
@@ -451,141 +441,39 @@ class DataIngestionService:
                 )
                 ui_resp.raise_for_status()
                 ui = ui_resp.json()
+                profile_name = ui.get("name", "Unknown")
                 person_id = ui.get("sub", "")
-                if not person_id:
-                    raise ValueError("empty sub in userinfo response")
-                author_urn = f"urn:li:person:{person_id}"
             except Exception as exc:
                 return {
                     "platform": "linkedin",
                     "rows_inserted": 0,
-                    "errors": [f"LinkedIn profile lookup failed: {exc}"],
+                    "errors": [f"LinkedIn token validation failed: {exc}"],
                 }
 
-            # ── 3. Fetch user's UGC posts (requires w_member_social scope) ──
-            try:
-                posts_resp = await client.get(
-                    f"{_LI_BASE}/ugcPosts",
-                    headers=v2_headers,
-                    params={
-                        "q": "authors",
-                        "authors": f"List({author_urn})",
-                        "count": LINKEDIN_LIMIT,
-                    },
-                )
-                if posts_resp.status_code == 403:
-                    err_detail = ""
-                    try:
-                        err_detail = posts_resp.text[:400]
-                    except Exception:
-                        pass
-                    logger.warning("LinkedIn /v2/ugcPosts 403: %s", err_detail)
-                    return {
-                        "platform": "linkedin",
-                        "rows_inserted": 0,
-                        "profile_connected": True,
-                        "profile_name": ui.get("name"),
-                        "errors": [
-                            f"LinkedIn posts API returned 403. Detail: {err_detail}. "
-                            "Ensure 'Share on LinkedIn' product is approved for your app, "
-                            "then disconnect and reconnect to get a token with w_member_social."
-                        ],
-                    }
-                posts_resp.raise_for_status()
-                posts = posts_resp.json().get("elements", [])
-            except Exception as exc:
-                errors.append(f"linkedin/ugcPosts: {exc}")
-                posts = []
+        logger.info(
+            "LinkedIn token verified for user %s (profile: %s, sub: %s)",
+            user_id, profile_name, person_id,
+        )
 
-            for post in posts:
-                post_urn = post.get("id", "")
-                if not post_urn:
-                    continue
-
-                # created timestamp — /v2/ugcPosts has `created.time` (epoch ms)
-                created_ms = _safe_float(post.get("created", {}).get("time", 0))
-                publish_time = _utc_from_ts(created_ms / 1000) if created_ms else None
-                if not publish_time:
-                    continue
-
-                # ── 4. Social actions (likes + comments) ────────────────
-                likes = 0
-                comments = 0
-                impressions = 0
-
-                try:
-                    sa_resp = await client.get(
-                        f"{_LI_BASE}/socialActions/{post_urn}",
-                        headers=v2_headers,
-                    )
-                    if sa_resp.status_code == 200:
-                        sa = sa_resp.json()
-                        likes = _safe_int(sa.get("likesSummary", {}).get("totalLikes", 0))
-                        comments = _safe_int(
-                            sa.get("commentsSummary", {}).get("totalFirstLevelComments", 0)
-                        )
-                except Exception as exc:
-                    errors.append(f"linkedin/socialActions/{post_urn}: {exc}")
-
-                # ── 5. Share statistics (impressions) ───────────────────
-                encoded_urn = post_urn.replace(":", "%3A")
-                try:
-                    stats_resp = await client.get(
-                        f"{_LI_BASE}/organizationalEntityShareStatistics",
-                        headers=v2_headers,
-                        params={
-                            "q": "organizationalEntity",
-                            "organizationalEntity": author_urn,
-                            "shares[0]": post_urn,
-                        },
-                    )
-                    if stats_resp.status_code == 200:
-                        elems = stats_resp.json().get("elements", [])
-                        if elems:
-                            total_stats = elems[0].get("totalShareStatistics", {})
-                            impressions = _safe_int(total_stats.get("impressionCount", 0))
-                except Exception:
-                    pass  # impressions are optional
-
-                if impressions == 0:
-                    impressions = max((likes + comments) * 50, 50)
-
-                interactions = likes + comments
-                eng_rate = interactions / impressions
-
-                await self._upsert_audience_pattern(
-                    user_id=user_id,
-                    platform="linkedin",
-                    time_slot=publish_time,
-                    engagement_rate=eng_rate,
-                    reach=impressions,
-                    interactions=interactions,
-                )
-                await self._upsert_platform_performance(
-                    user_id=user_id,
-                    platform="linkedin",
-                    post_id=post_urn,
-                    post_url=f"https://www.linkedin.com/feed/update/{encoded_urn}/",
-                    publish_time=publish_time,
-                    content_type="text",
-                    likes=likes,
-                    comments=comments,
-                    shares=0,
-                    reach=impressions,
-                    engagement_score=eng_rate,
-                    raw={
-                        "post_urn": post_urn,
-                        "author_urn": author_urn,
-                        "likes": likes,
-                        "comments": comments,
-                        "impressions": impressions,
-                    },
-                )
-                inserted += 1
-
-        await self.db.commit()
-        logger.info("LinkedIn ingestion: %d posts ingested for user %s", inserted, user_id)
-        return {"platform": "linkedin", "rows_inserted": inserted, "errors": errors}
+        # ── 3. Commit no new rows — seeded data is sufficient ────────────
+        # Reading post history requires r_member_social (Marketing API tier,
+        # not available to standard developer apps). The 1 000+ seeded
+        # audience_pattern rows already give Prophet enough data to forecast
+        # optimal LinkedIn posting times.
+        return {
+            "platform": "linkedin",
+            "rows_inserted": 0,
+            "profile_connected": True,
+            "profile_name": profile_name,
+            "errors": [],
+            "info": (
+                f"LinkedIn connected ✓ ({profile_name}). "
+                "Post history read-access requires LinkedIn's Marketing Developer Platform "
+                "tier (r_member_social scope) — not available to standard apps. "
+                "Timing predictions for LinkedIn use industry-standard engagement patterns "
+                "already loaded in the database (1 000+ data points)."
+            ),
+        }
 
     # ── status ─────────────────────────────────────────────────────────
 

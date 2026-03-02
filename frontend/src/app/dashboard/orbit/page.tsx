@@ -179,7 +179,7 @@ export default function OrbitPage() {
   // ── Ingest / data sync state ─────────────────────────────────────────────
   const [ingestStatus, setIngestStatus] = useState<IngestStatus | null>(null);
   const [ingestingPlatform, setIngestingPlatform] = useState<string | null>(null);
-  const [ingestResults, setIngestResults] = useState<Record<string, {rows: number; errors: string[]; ts: string}>>({});
+  const [ingestResults, setIngestResults] = useState<Record<string, {rows: number; errors: string[]; info?: string; ts: string}>>({});
   const loadTiming = useCallback(async () => {
     setTimingLoading(true);
     const results: Record<string, OptimalTimeResponse> = {};
@@ -217,11 +217,11 @@ export default function OrbitPage() {
           ...prev,
           reddit:   { rows: r.reddit.rows_inserted,   errors: r.reddit.errors,   ts: now },
           youtube:  { rows: r.youtube.rows_inserted,  errors: r.youtube.errors,  ts: now },
-          linkedin: { rows: r.linkedin.rows_inserted, errors: r.linkedin.errors, ts: now },
+          linkedin: { rows: r.linkedin.rows_inserted, errors: r.linkedin.errors, info: (r.linkedin as any).info, ts: now },
         }));
       } else {
-        const r = result as IngestResult;
-        setIngestResults(prev => ({ ...prev, [platform]: { rows: r.rows_inserted, errors: r.errors, ts: now } }));
+        const r = result as IngestResult & { info?: string };
+        setIngestResults(prev => ({ ...prev, [platform]: { rows: r.rows_inserted, errors: r.errors, info: r.info, ts: now } }));
       }
       await loadIngestStatus();
       // Refresh timing predictions with new data
@@ -866,10 +866,14 @@ export default function OrbitPage() {
                   <div className={`px-2.5 py-1.5 rounded-lg text-[9px] leading-relaxed ${
                     result.errors.length > 0
                       ? "bg-[rgba(248,113,113,0.08)] text-[#F87171] border border-[rgba(248,113,113,0.15)]"
+                      : result.info
+                      ? "bg-[rgba(59,130,246,0.08)] text-[#60A5FA] border border-[rgba(59,130,246,0.15)]"
                       : "bg-[rgba(52,211,153,0.08)] text-[#34D399] border border-[rgba(52,211,153,0.15)]"
                   }`}>
                     {result.errors.length > 0
-                      ? result.errors[0].slice(0, 100)
+                      ? result.errors[0].slice(0, 120)
+                      : result.info
+                      ? result.info.slice(0, 140)
                       : `+${result.rows} rows synced at ${result.ts}`}
                   </div>
                 )}
@@ -894,8 +898,8 @@ export default function OrbitPage() {
           <span className="font-semibold text-[var(--text-secondary)]">How data sync works: </span>
           <span className="text-[#F97316]">Reddit</span> — pulls top posts from your niche subreddits using the public API (no login needed). Engagement = (upvotes + comments) / estimated reach.{" "}
           <span className="text-[#EF4444]">YouTube</span> — pulls trending videos via YouTube Data API. Requires <code className="font-mono text-[10px] bg-white/5 px-1 py-0.5 rounded">YOUTUBE_API_KEY</code> in .env. Engagement = (likes + comments) / views.{" "}
-          <span className="text-[#3B82F6]">LinkedIn</span> — pulls your own posts via LinkedIn API. Requires connecting LinkedIn first (OAuth token).{" "}
-          After syncing, re-run <code className="font-mono text-[10px] bg-white/5 px-1 py-0.5 rounded">python scripts/train_models.py</code> to retrain LightGBM on the real data.
+          <span className="text-[#3B82F6]">LinkedIn</span> — verifies your OAuth token is live. Post history read-access requires LinkedIn&apos;s Marketing Developer Platform tier; timing predictions use industry-standard engagement curves already in the DB (1 000+ data points).{" "}
+          After syncing Reddit + YouTube, re-run <code className="font-mono text-[10px] bg-white/5 px-1 py-0.5 rounded">python scripts/train_models.py</code> to retrain LightGBM on the real data.
         </div>
       </section>
 
