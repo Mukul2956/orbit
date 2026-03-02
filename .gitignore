@@ -21,8 +21,8 @@ build/
 # Alembic generated pyc
 alembic/__pycache__/
 
-# ML model files
-models/
+# ML model files (root-level .pkl files only)
+/models/
 *.pkl
 *.joblib
 
