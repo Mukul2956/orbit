@@ -74,11 +74,13 @@ class TimingEngine:
             try:
                 return await self._predict_with_prophet(patterns, platform, target_tz)
             except Exception as exc:
-                logger.warning("Prophet prediction failed (%s); using defaults.", exc)
-                return self._get_default_time(
-                    platform, target_tz,
-                    reason=f"Industry default for {platform} — ML forecast unavailable (Stan backend not configured); {len(patterns)} historical rows available",
-                )
+                logger.info("Prophet unavailable (%s); using pattern-based prediction.", exc)
+
+            # Prophet not available — use pattern-based ML (pure pandas, no Stan needed)
+            try:
+                return self._predict_with_patterns(patterns, platform, target_tz)
+            except Exception as exc2:
+                logger.warning("Pattern prediction failed (%s); using defaults.", exc2)
 
         return self._get_default_time(platform, target_tz)
 
@@ -99,7 +101,31 @@ class TimingEngine:
                 for i in range(n)
             ]
 
-        return await self._top_slots_from_prophet(patterns, platform, n)
+        try:
+            return await self._top_slots_from_prophet(patterns, platform, n)
+        except Exception:
+            pass
+
+        # Pattern-based top slots fallback
+        import numpy as np
+        df = pd.DataFrame(patterns)
+        df["ds"] = pd.to_datetime(df["time_slot"])
+        df["hour"] = df["ds"].dt.hour
+        df["dow"] = df["ds"].dt.dayofweek
+        df["eng"] = df["engagement_rate"].clip(lower=0)
+        df = df[df["hour"].between(6, 22)]
+        if PLATFORM_DEFAULTS.get(platform, {}).get("avoid_weekends"):
+            df = df[df["dow"] < 5]
+        grouped = df.groupby(["dow", "hour"])["eng"].mean().nlargest(n)
+        now = datetime.utcnow()
+        results = []
+        for rank, ((dow, hour), score) in enumerate(grouped.items(), 1):
+            days_ahead = (int(dow) - now.weekday()) % 7
+            if days_ahead == 0 and now.hour >= hour:
+                days_ahead = 7
+            t = (now + timedelta(days=days_ahead)).replace(hour=int(hour), minute=0, second=0, microsecond=0)
+            results.append({"rank": rank, "time": t, "score": float(score)})
+        return results
 
     # ─── Internal helpers ────────────────────────────────────────────────────
 
@@ -189,6 +215,73 @@ class TimingEngine:
             "confidence_score": round(confidence, 3),
             "is_default_time": False,
             "reasoning": f"Prophet forecast — top engagement slot in next 7 days (yhat={top['yhat']:.3f})",
+        }
+
+    def _predict_with_patterns(
+        self,
+        patterns: list[dict],
+        platform: str,
+        target_tz: str = "UTC",
+    ) -> dict:
+        """
+        Pattern-based optimal time prediction using pure pandas — no Stan/Prophet needed.
+        Finds the hour-of-week (day × hour cell) with the highest mean engagement,
+        then schedules the next occurrence of that slot in the future.
+        Confidence = (best_cell_mean - overall_mean) / overall_std, normalised to [0.4, 0.95].
+        """
+        import numpy as np
+
+        df = pd.DataFrame(patterns)
+        df["ds"] = pd.to_datetime(df["time_slot"])
+        df["hour"] = df["ds"].dt.hour
+        df["dow"] = df["ds"].dt.dayofweek  # 0=Mon … 6=Sun
+        df["eng"] = df["engagement_rate"].clip(lower=0)
+
+        # Restrict to sensible posting hours (6 AM–10 PM)
+        df = df[df["hour"].between(6, 22)]
+
+        # Apply platform rules
+        if PLATFORM_DEFAULTS.get(platform, {}).get("avoid_weekends"):
+            df = df[df["dow"] < 5]
+
+        if df.empty:
+            return self._get_default_time(platform, target_tz)
+
+        # Best hour-of-week cell
+        grouped = df.groupby(["dow", "hour"])["eng"].mean()
+        best_dow, best_hour = grouped.idxmax()
+
+        overall_mean = float(df["eng"].mean())
+        overall_std  = float(df["eng"].std()) or 1e-6
+        best_val     = float(grouped.max())
+
+        # Normalised z-score confidence: how many σ above average is the best slot?
+        z = (best_val - overall_mean) / overall_std
+        # Map z in [0, 3] → confidence in [0.4, 0.95]
+        raw_conf = 0.4 + min(z / 3.0, 1.0) * 0.55
+        confidence = round(float(np.clip(raw_conf, 0.4, 0.95)), 3)
+
+        # Find next occurrence of (best_dow, best_hour) from now
+        now = datetime.utcnow()
+        days_ahead = (best_dow - now.weekday()) % 7
+        if days_ahead == 0 and now.hour >= best_hour:
+            days_ahead = 7  # already past that slot today, use next week
+        candidate = (now + timedelta(days=days_ahead)).replace(
+            hour=best_hour, minute=0, second=0, microsecond=0
+        )
+
+        tz = pytz.timezone(target_tz)
+        optimal_dt = candidate.replace(tzinfo=pytz.utc).astimezone(tz)
+
+        day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        return {
+            "optimal_time": optimal_dt,
+            "confidence_score": confidence,
+            "is_default_time": False,
+            "reasoning": (
+                f"Pattern ML ({len(patterns)} rows) — best slot: {day_names[best_dow]} {best_hour:02d}:00 UTC "
+                f"(avg engagement {best_val:.4f} vs overall {overall_mean:.4f})"
+            ),
         }
 
     async def _top_slots_from_prophet(

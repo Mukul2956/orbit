@@ -600,7 +600,9 @@ export default function OrbitPage() {
             <Zap size={15} className="text-[#FBBF24]" />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Optimal Posting Times</h2>
             <span className="text-[10px] text-[var(--text-muted)] bg-white/5 px-2 py-0.5 rounded-full">
-              Prophet ML forecast · 7-day window
+              {Object.values(timingData).some(t => t && !t.is_default_time)
+                ? "Pattern ML · trained on your data"
+                : "Industry defaults · sync data to enable ML"}
             </span>
           </div>
           <button onClick={loadTiming}
@@ -615,6 +617,8 @@ export default function OrbitPage() {
             const color = PLATFORM_COLORS[platform] ?? "#525968";
             const displayName = { linkedin: "LinkedIn", youtube: "YouTube", reddit: "Reddit" }[platform];
             const isML = t && !t.is_default_time;
+            const isProphet = isML && t?.reasoning?.includes("Prophet");
+            const subLabel = !t ? "Loading…" : isML ? (isProphet ? "Prophet ML" : "Pattern ML") : "Industry default";
 
             return (
               <Card key={platform} padding="md" className="flex flex-col gap-3">
@@ -627,7 +631,7 @@ export default function OrbitPage() {
                   <div className="flex-1">
                     <p className="text-xs font-semibold text-[var(--text-primary)]">{displayName}</p>
                     <p className="text-[10px] text-[var(--text-muted)]">
-                      {isML ? "ML forecast" : "Industry default"}
+                      {subLabel}
                     </p>
                   </div>
                   <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full ${
