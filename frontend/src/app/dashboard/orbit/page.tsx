@@ -164,8 +164,13 @@ export default function OrbitPage() {
   }, []);
 
   const handleDisconnect = useCallback(async (platform: string) => {
-    await disconnectPlatform(DEMO_USER_ID, platform);
-    await loadPlatformStatus();
+    try {
+      await disconnectPlatform(DEMO_USER_ID, platform);
+    } catch {
+      // ignore – mark disconnected in UI anyway
+    } finally {
+      await loadPlatformStatus();
+    }
   }, [loadPlatformStatus]);
 
   // ── Optimal Timing ──────────────────────────────────────────────

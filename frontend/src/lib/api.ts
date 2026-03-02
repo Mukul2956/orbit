@@ -116,9 +116,10 @@ export async function getOAuthUrl(
 }
 
 export async function disconnectPlatform(userId: string, platform: string): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/platforms/${userId}/${platform}`, {
+  const res = await fetch(`${API_BASE}/api/v1/platforms/${userId}/${platform}`, {
     method: "DELETE",
   });
+  if (!res.ok) throw new Error(`Disconnect failed: ${res.status}`);
 }
 
 // ─── YouTube ─────────────────────────────────────────────────────────────────

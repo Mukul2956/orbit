@@ -35,7 +35,7 @@ async def get_platform_status(
     """
     stmt = select(PlatformConfig).where(
         PlatformConfig.user_id == user_id,
-        PlatformConfig.is_active == True,
+        PlatformConfig.is_active.is_(True),
     )
     result = await db.execute(stmt)
     configs: list[PlatformConfig] = result.scalars().all()
