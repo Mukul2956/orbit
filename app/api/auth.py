@@ -43,11 +43,7 @@ YOUTUBE_SCOPES     = " ".join([
 
 LINKEDIN_AUTH_URL  = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
-# NOTE: "w_member_social" (posting) requires "Share on LinkedIn" product approval
-# in the LinkedIn Developer Portal → Products tab. Without that approval LinkedIn
-# silently loops back to the login page.
-# Use only OIDC profile scopes until the product is approved.
-LINKEDIN_SCOPES    = "openid profile email"
+LINKEDIN_SCOPES    = "openid profile email w_member_social"
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
