@@ -434,13 +434,11 @@ class DataIngestionService:
 
         inserted = 0
         errors: list[str] = []
-        # auth_headers: plain bearer — works for all v2 + OIDC endpoints
-        auth_headers = {"Authorization": f"Bearer {token}"}
-        # rest_headers: required for the new LinkedIn REST API
-        # LinkedIn-Version must be within a rolling 12-month window from today
-        rest_headers = {
+        # v2_headers: correct for the LinkedIn v2 API — NO LinkedIn-Version header
+        # (LinkedIn-Version only belongs on the newer /rest/* endpoints which
+        # require a higher API tier; /v2/ugcPosts works with w_member_social scope)
+        v2_headers = {
             "Authorization": f"Bearer {token}",
-            "LinkedIn-Version": "202502",
             "X-Restli-Protocol-Version": "2.0.0",
         }
 
@@ -464,16 +462,14 @@ class DataIngestionService:
                     "errors": [f"LinkedIn profile lookup failed: {exc}"],
                 }
 
-            # ── 3. Fetch user's posts via new LinkedIn REST API (2023+) ───────
-            # Old /v2/ugcPosts + LinkedIn-Version header caused 403.
-            # Correct combination: /rest/posts + LinkedIn-Version: 202304
+            # ── 3. Fetch user's UGC posts (requires w_member_social scope) ──
             try:
                 posts_resp = await client.get(
-                    "https://api.linkedin.com/rest/posts",
-                    headers=rest_headers,
+                    f"{_LI_BASE}/ugcPosts",
+                    headers=v2_headers,
                     params={
-                        "q": "author",
-                        "author": author_urn,
+                        "q": "authors",
+                        "authors": f"List({author_urn})",
                         "count": LINKEDIN_LIMIT,
                     },
                 )
@@ -483,16 +479,16 @@ class DataIngestionService:
                         err_detail = posts_resp.text[:400]
                     except Exception:
                         pass
-                    logger.warning("LinkedIn /rest/posts 403: %s", err_detail)
+                    logger.warning("LinkedIn /v2/ugcPosts 403: %s", err_detail)
                     return {
                         "platform": "linkedin",
                         "rows_inserted": 0,
                         "profile_connected": True,
                         "profile_name": ui.get("name"),
                         "errors": [
-                            "LinkedIn posts API returned 403. Your token may be missing the "
-                            "w_member_social scope. Please disconnect LinkedIn, reconnect, and "
-                            f"try again. API detail: {err_detail}"
+                            f"LinkedIn posts API returned 403. Detail: {err_detail}. "
+                            "Ensure 'Share on LinkedIn' product is approved for your app, "
+                            "then disconnect and reconnect to get a token with w_member_social."
                         ],
                     }
                 posts_resp.raise_for_status()
@@ -506,11 +502,8 @@ class DataIngestionService:
                 if not post_urn:
                     continue
 
-                # created timestamp — new REST API has `publishedAt` (epoch ms),
-                # old ugcPosts used `created.time`; support both formats
-                created_ms = _safe_float(
-                    post.get("publishedAt") or post.get("created", {}).get("time", 0)
-                )
+                # created timestamp — /v2/ugcPosts has `created.time` (epoch ms)
+                created_ms = _safe_float(post.get("created", {}).get("time", 0))
                 publish_time = _utc_from_ts(created_ms / 1000) if created_ms else None
                 if not publish_time:
                     continue
@@ -523,7 +516,7 @@ class DataIngestionService:
                 try:
                     sa_resp = await client.get(
                         f"{_LI_BASE}/socialActions/{post_urn}",
-                        headers=auth_headers,
+                        headers=v2_headers,
                     )
                     if sa_resp.status_code == 200:
                         sa = sa_resp.json()
@@ -539,7 +532,7 @@ class DataIngestionService:
                 try:
                     stats_resp = await client.get(
                         f"{_LI_BASE}/organizationalEntityShareStatistics",
-                        headers=headers,
+                        headers=v2_headers,
                         params={
                             "q": "organizationalEntity",
                             "organizationalEntity": author_urn,
