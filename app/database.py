@@ -4,26 +4,23 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
 
 # ─── AsyncEngine ─────────────────────────────────────────────────────────────
-# Supabase uses PgBouncer in *transaction* pooling mode (port 6543).
-# Transaction pooling reassigns the underlying Postgres connection after every
-# transaction, so SQLAlchemy's own connection pool must be disabled (NullPool)
-# and asyncpg's prepared-statement cache must be set to 0 — otherwise asyncpg
-# tries to reuse a named prepared statement that no longer belongs to this
-# Postgres backend and throws DuplicatePreparedStatementError.
+# DATABASE_URL must point at Supabase's *session* pooler (port 5432), NOT the
+# PgBouncer transaction pooler (port 6543).  Transaction mode reassigns the
+# underlying Postgres connection after every statement, so asyncpg's named
+# prepared statements collide across requests → DuplicatePreparedStatementError.
+# Session mode keeps one Postgres backend per client connection, so asyncpg
+# prepared statements work correctly and SQLAlchemy pooling is safe to use.
 engine = create_async_engine(
     settings.DATABASE_URL,
-    poolclass=NullPool,
+    pool_size=10,
+    max_overflow=5,
+    pool_pre_ping=True,
     echo=(settings.ENVIRONMENT == "development"),
-    connect_args={
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-    },
 )
 
 AsyncSessionLocal = async_sessionmaker(
