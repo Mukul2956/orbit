@@ -41,6 +41,20 @@ services:
       - key: YOUTUBE_API_KEY
         sync: false
 
+      # ── Supabase extras ────────────────────────────────────────────────────
+      - key: SYNC_DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+      # ── Reddit extras ───────────────────────────────────────────────────────
+      - key: REDDIT_USERNAME
+        sync: false
+      - key: REDDIT_PASSWORD
+        sync: false
+
       # ── JWT / Auth ──────────────────────────────────────────────────────────
       - key: SECRET_KEY
         generateValue: true   # Render auto-generates a secure random value
@@ -48,6 +62,16 @@ services:
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "30"
+
+      # ── App config ──────────────────────────────────────────────────────────
+      - key: ENVIRONMENT
+        value: production
+      - key: DEFAULT_TIMEZONE
+        value: UTC
+      - key: MODEL_PATH
+        value: ./models
+      - key: PUBLISH_RETRY_ATTEMPTS
+        value: "3"
 
       # ── Port (Render's internal routing) ───────────────────────────────────
       - key: PORT
