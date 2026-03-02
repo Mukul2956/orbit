@@ -82,9 +82,7 @@ async def search_videos(
         thumb = (
             thumbs.get("maxres", {}).get("url")
             or thumbs.get("standard", {}).get("url")
-            or thumbs.get("high", {}).get("url")
-            or thumbs.get("medium", {}).get("url")
-            or thumbs.get("default", {}).get("url")
+            or thumbs.get("default", {}).get("url")  # default (120x90) always exists
         )
         stats = stats_by_id.get(vid_id, {})
         results.append({
@@ -139,9 +137,7 @@ async def get_trending_videos(
         thumb = (
             thumbs.get("maxres", {}).get("url")
             or thumbs.get("standard", {}).get("url")
-            or thumbs.get("high", {}).get("url")
-            or thumbs.get("medium", {}).get("url")
-            or thumbs.get("default", {}).get("url")
+            or thumbs.get("default", {}).get("url")  # default (120x90) always exists
         )
         results.append({
             "id": item["id"],

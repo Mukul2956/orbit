@@ -434,10 +434,13 @@ class DataIngestionService:
 
         inserted = 0
         errors: list[str] = []
-        headers = {
+        # auth_headers: plain bearer — works for all v2 + OIDC endpoints
+        auth_headers = {"Authorization": f"Bearer {token}"}
+        # rest_headers: required for the new 2023+ LinkedIn REST API
+        rest_headers = {
             "Authorization": f"Bearer {token}",
-            "X-Restli-Protocol-Version": "2.0.0",
             "LinkedIn-Version": "202304",
+            "X-Restli-Protocol-Version": "2.0.0",
         }
 
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -460,31 +463,35 @@ class DataIngestionService:
                     "errors": [f"LinkedIn profile lookup failed: {exc}"],
                 }
 
-            # ── 3. Fetch user's UGC posts ────────────────────────────────
-            # Requires w_member_social scope ("Share on LinkedIn" product approval).
-            # If the token doesn't have that scope LinkedIn returns 403.
+            # ── 3. Fetch user's posts via new LinkedIn REST API (2023+) ───────
+            # Old /v2/ugcPosts + LinkedIn-Version header caused 403.
+            # Correct combination: /rest/posts + LinkedIn-Version: 202304
             try:
                 posts_resp = await client.get(
-                    f"{_LI_BASE}/ugcPosts",
-                    headers=headers,
+                    "https://api.linkedin.com/rest/posts",
+                    headers=rest_headers,
                     params={
-                        "q": "authors",
-                        "authors": f"List({author_urn})",
+                        "q": "author",
+                        "author": author_urn,
                         "count": LINKEDIN_LIMIT,
                     },
                 )
                 if posts_resp.status_code == 403:
+                    err_detail = ""
+                    try:
+                        err_detail = posts_resp.text[:400]
+                    except Exception:
+                        pass
+                    logger.warning("LinkedIn /rest/posts 403: %s", err_detail)
                     return {
                         "platform": "linkedin",
                         "rows_inserted": 0,
                         "profile_connected": True,
                         "profile_name": ui.get("name"),
                         "errors": [
-                            "LinkedIn account connected ✓  but reading post history requires "
-                            "the 'Share on LinkedIn' product to be approved for your LinkedIn App. "
-                            "Go to linkedin.com/developers/apps → your app → Products tab → "
-                            "request 'Share on LinkedIn'. Once approved (usually instant for test apps), "
-                            "reconnect and pull again. Until then the ML models use the seeded training data."
+                            "LinkedIn posts API returned 403. Your token may be missing the "
+                            "w_member_social scope. Please disconnect LinkedIn, reconnect, and "
+                            f"try again. API detail: {err_detail}"
                         ],
                     }
                 posts_resp.raise_for_status()
@@ -498,8 +505,11 @@ class DataIngestionService:
                 if not post_urn:
                     continue
 
-                # created timestamp (epoch ms)
-                created_ms = _safe_float(post.get("created", {}).get("time", 0))
+                # created timestamp — new REST API has `publishedAt` (epoch ms),
+                # old ugcPosts used `created.time`; support both formats
+                created_ms = _safe_float(
+                    post.get("publishedAt") or post.get("created", {}).get("time", 0)
+                )
                 publish_time = _utc_from_ts(created_ms / 1000) if created_ms else None
                 if not publish_time:
                     continue
@@ -512,7 +522,7 @@ class DataIngestionService:
                 try:
                     sa_resp = await client.get(
                         f"{_LI_BASE}/socialActions/{post_urn}",
-                        headers=headers,
+                        headers=auth_headers,
                     )
                     if sa_resp.status_code == 200:
                         sa = sa_resp.json()
