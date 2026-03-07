@@ -93,13 +93,18 @@ export default function OrbitPage() {
 
   // ── Live Queue ─────────────────────────────────────────────────────────────
   const [liveQueue, setLiveQueue]         = useState<DraftResponse[]>([]);
+  const [queueEntries, setQueueEntries]   = useState<QueueEntry[]>([]);
   const [queueLoading, setQueueLoading]   = useState(true);
 
   const loadQueue = useCallback(async () => {
     setQueueLoading(true);
     try {
-      const drafts = await fetchUserDrafts(DEMO_USER_ID);
+      const [drafts, entries] = await Promise.all([
+        fetchUserDrafts(DEMO_USER_ID),
+        fetchUserQueue(DEMO_USER_ID).catch(() => [] as QueueEntry[]),
+      ]);
       setLiveQueue(drafts);
+      setQueueEntries(entries);
     } catch { /* silent — show empty */ }
     finally { setQueueLoading(false); }
   }, []);
@@ -478,38 +483,61 @@ export default function OrbitPage() {
                     + Schedule post
                   </button>
                 </div>
-              ) : liveQueue.map((draft) => {
-                const s = STATUS_STYLE[draft.status] ?? STATUS_STYLE.draft;
-                return (
-                  <div key={draft.id}
-                    className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-3.5 hover:border-[var(--border-strong)] transition-all">
-                    <div className="flex items-start gap-2 mb-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-[var(--text-primary)] truncate">{draft.title}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[10px] font-medium text-[var(--text-muted)] capitalize">{draft.content_type}</span>
-                          {draft.is_evergreen && (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[rgba(52,211,153,0.1)] text-[#34D399]">Evergreen</span>
-                          )}
+              ) : (() => {
+                const entryByContent = Object.fromEntries(queueEntries.map(e => [e.content_id, e]));
+                return liveQueue.map((draft) => {
+                  const entry = entryByContent[draft.id];
+                  const effectiveStatus = entry?.status ?? draft.status;
+                  const s = STATUS_STYLE[effectiveStatus] ?? STATUS_STYLE.draft;
+                  return (
+                    <div key={draft.id}
+                      className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-3.5 hover:border-[var(--border-strong)] transition-all">
+                      <div className="flex items-start gap-2 mb-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-[var(--text-primary)] truncate">{draft.title}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] font-medium text-[var(--text-muted)] capitalize">{draft.content_type}</span>
+                            {draft.is_evergreen && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[rgba(52,211,153,0.1)] text-[#34D399]">Evergreen</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+                            style={{ color: s.color, background: s.bg }}>{s.label}</span>
+                          <button className="p-1 hover:bg-white/5 rounded-md text-[var(--text-muted)] transition-colors">
+                            <MoreHorizontal size={12} />
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full"
-                          style={{ color: s.color, background: s.bg }}>{s.label}</span>
-                        <button className="p-1 hover:bg-white/5 rounded-md text-[var(--text-muted)] transition-colors">
-                          <MoreHorizontal size={12} />
-                        </button>
+                      {entry?.platforms && entry.platforms.length > 0 && (
+                        <div className="flex items-center gap-1 flex-wrap mb-1.5">
+                          {entry.platforms.map(p => (
+                            <span key={p} className="text-[9px] font-medium px-1.5 py-0.5 rounded-md capitalize"
+                              style={{ background: `${PLATFORM_COLORS[p] ?? "#525968"}18`, color: PLATFORM_COLORS[p] ?? "#525968" }}>
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                        <Clock size={9} />
+                        {entry?.scheduled_time
+                          ? new Date(entry.scheduled_time).toLocaleString("en-US", {
+                              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                            })
+                          : new Date(draft.created_at).toLocaleString("en-US", {
+                              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                            })
+                        }
+                        {entry?.scheduled_time && (
+                          <span className="ml-1 text-[#60A5FA]">· scheduled</span>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                      <Clock size={9} />
-                      {new Date(draft.created_at).toLocaleString("en-US", {
-                        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           )}
 
